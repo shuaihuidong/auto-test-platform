@@ -1,0 +1,2067 @@
+<template>
+  <div class="script-editor">
+    <div class="editor-header">
+      <a-space>
+        <a-button type="primary" @click="handleSave" :loading="saving">
+          <template #icon><SaveOutlined /></template>
+          保存
+        </a-button>
+        <a-button @click="handleRun">
+          <template #icon><PlayCircleOutlined /></template>
+          运行
+        </a-button>
+        <a-button @click="handleClear">
+          <template #icon><ClearOutlined /></template>
+          清空
+        </a-button>
+      </a-space>
+      <a-space>
+        <span>步骤数: {{ steps.length }}</span>
+      </a-space>
+    </div>
+
+    <div class="editor-body">
+      <!-- 步骤面板 -->
+      <div class="step-palette">
+        <div class="palette-header">
+          <h4>步骤类型</h4>
+        </div>
+        <div class="palette-body">
+          <div
+            v-for="category in stepCategories"
+            :key="category.name"
+            class="step-category"
+          >
+            <div class="category-title">{{ category.label }}</div>
+            <div class="category-items">
+              <div
+                v-for="step in category.steps"
+                :key="step.type"
+                class="step-item"
+                draggable="true"
+                @dragstart="handleDragStart($event, step)"
+              >
+                <component :is="step.icon" />
+                <span>{{ step.label }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="palette-header" style="margin-top: 24px;">
+          <h4>我的模块</h4>
+        </div>
+        <div class="palette-body">
+          <div
+            v-for="module in modules"
+            :key="module.id"
+            class="step-item module-item"
+            draggable="true"
+            @dragstart="handleDragStart($event, { type: 'module', ...module })"
+          >
+            <AppstoreOutlined />
+            <span>{{ module.module_name || module.name }}</span>
+          </div>
+          <a-empty v-if="!modules.length" description="暂无模块" :image="false" />
+        </div>
+      </div>
+
+      <!-- 步骤画布 -->
+      <div class="step-canvas">
+        <div
+          class="canvas-content"
+          @drop="handleDrop"
+          @dragover.prevent
+        >
+          <draggable
+            v-model="steps"
+            item-key="id"
+            handle=".step-handle"
+            @end="handleDragEnd"
+          >
+            <template #item="{ element: step, index }">
+              <div
+                class="step-card"
+                :class="{ selected: selectedStepId === step.id }"
+                @click="selectStep(step)"
+              >
+                <div class="step-handle step-handle">
+                  <HolderOutlined />
+                </div>
+                <div class="step-icon">
+                  <component :is="getStepIcon(step.type)" />
+                </div>
+                <div class="step-info">
+                  <div class="step-name">{{ step.name }}</div>
+                  <div class="step-type">{{ getStepLabel(step.type) }}</div>
+                </div>
+                <div class="step-actions">
+                  <a-button
+                    type="text"
+                    size="small"
+                    danger
+                    @click.stop="removeStep(index)"
+                  >
+                    <template #icon><DeleteOutlined /></template>
+                  </a-button>
+                </div>
+              </div>
+            </template>
+          </draggable>
+
+          <a-empty
+            v-if="!steps.length"
+            description="从左侧拖拽步骤到此处"
+            :image="Empty.PRESENTED_IMAGE_SIMPLE"
+          />
+        </div>
+      </div>
+
+      <!-- 属性面板 -->
+      <div class="property-panel">
+        <div class="panel-header">
+          <h4>属性设置</h4>
+          <a-button
+            v-if="selectedStep"
+            type="text"
+            size="small"
+            @click="clearSelection"
+          >
+            <CloseOutlined />
+          </a-button>
+        </div>
+        <div class="panel-body">
+          <div v-if="selectedStep">
+            <a-form layout="vertical">
+              <a-form-item label="步骤名称">
+                <a-input
+                  v-model:value="selectedStep.name"
+                  placeholder="请输入步骤名称"
+                />
+              </a-form-item>
+
+              <a-form-item label="步骤类型">
+                <a-input v-model:value="selectedStep.type" disabled />
+              </a-form-item>
+
+              <!-- 根据步骤类型显示不同的参数 -->
+              <template v-if="selectedStep.type === 'goto'">
+                <a-form-item label="URL">
+                  <a-input
+                    v-model:value="selectedStep.params.url"
+                    placeholder="https://example.com"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 鼠标点击操作 -->
+              <template v-else-if="['click', 'double_click', 'right_click', 'hover', 'clear', 'radio'].includes(selectedStep.type)">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="name">Name</a-select-option>
+                    <a-select-option value="class">Class</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                    <a-select-option value="tag">Tag Name</a-select-option>
+                    <a-select-option value="link_text">Link Text</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//button[@id='submit']"
+                    :rows="2"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 输入操作 -->
+              <template v-else-if="selectedStep.type === 'input'">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="name">Name</a-select-option>
+                    <a-select-option value="class">Class</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//input[@id='username']"
+                    :rows="2"
+                  />
+                </a-form-item>
+                <a-form-item label="输入值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.value"
+                    placeholder="请输入内容"
+                    :rows="2"
+                  />
+                </a-form-item>
+                <a-form-item label="先清空">
+                  <a-switch v-model:checked="selectedStep.params.clear_first" />
+                </a-form-item>
+              </template>
+
+              <!-- 文件上传 -->
+              <template v-else-if="selectedStep.type === 'upload'">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//input[@type='file']"
+                    :rows="2"
+                  />
+                </a-form-item>
+                <a-form-item label="文件路径">
+                  <a-input
+                    v-model:value="selectedStep.params.file_path"
+                    placeholder="C:\path\to\file.txt"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 下拉选择 -->
+              <template v-else-if="selectedStep.type === 'select'">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//select[@id='country']"
+                    :rows="2"
+                  />
+                </a-form-item>
+                <a-form-item label="选择值">
+                  <a-input
+                    v-model:value="selectedStep.params.value"
+                    placeholder="选项值或文本"
+                  />
+                </a-form-item>
+                <a-form-item label="选择方式">
+                  <a-radio-group v-model:value="selectedStep.params.by_value">
+                    <a-radio :value="true">按值</a-radio>
+                    <a-radio :value="false">按文本</a-radio>
+                  </a-radio-group>
+                </a-form-item>
+              </template>
+
+              <!-- 复选框 -->
+              <template v-else-if="selectedStep.type === 'checkbox'">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//input[@type='checkbox']"
+                    :rows="2"
+                  />
+                </a-form-item>
+                <a-form-item label="操作">
+                  <a-radio-group v-model:value="selectedStep.params.checked">
+                    <a-radio :value="true">选中</a-radio>
+                    <a-radio :value="false">取消选中</a-radio>
+                  </a-radio-group>
+                </a-form-item>
+              </template>
+
+              <!-- 通用断言 -->
+              <template v-else-if="selectedStep.type === 'assert'">
+                <a-form-item label="断言类型">
+                  <a-select v-model:value="selectedStep.params.assert_type">
+                    <a-select-option value="text">文本内容</a-select-option>
+                    <a-select-option value="exists">元素存在</a-select-option>
+                    <a-select-option value="visible">元素可见</a-select-option>
+                    <a-select-option value="attribute">属性值</a-select-option>
+                    <a-select-option value="url">当前URL</a-select-option>
+                    <a-select-option value="title">页面标题</a-select-option>
+                    <a-select-option value="enabled">元素可用</a-select-option>
+                    <a-select-option value="disabled">元素禁用</a-select-option>
+                    <a-select-option value="checked">元素选中</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item
+                  v-if="!['exists', 'visible', 'enabled', 'disabled', 'checked'].includes(selectedStep.params.assert_type)"
+                  label="期望值"
+                >
+                  <a-textarea
+                    v-model:value="selectedStep.params.expected"
+                    placeholder="请输入期望值"
+                    :rows="2"
+                  />
+                </a-form-item>
+                <a-form-item
+                  v-if="['text', 'attribute', 'exists', 'visible', 'enabled', 'disabled', 'checked'].includes(selectedStep.params.assert_type)"
+                  label="定位方式"
+                >
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item
+                  v-if="['text', 'attribute', 'exists', 'visible', 'enabled', 'disabled', 'checked'].includes(selectedStep.params.assert_type)"
+                  label="定位值"
+                >
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//div[@class='content']"
+                    :rows="2"
+                  />
+                </a-form-item>
+                <a-form-item v-if="selectedStep.params.assert_type === 'attribute'" label="属性名">
+                  <a-input
+                    v-model:value="selectedStep.params.attribute"
+                    placeholder="class, id, href等"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 标题断言 -->
+              <template v-else-if="selectedStep.type === 'assert_title'">
+                <a-form-item label="期望标题">
+                  <a-input
+                    v-model:value="selectedStep.params.expected"
+                    placeholder="请输入期望的页面标题"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- URL断言 -->
+              <template v-else-if="selectedStep.type === 'assert_url'">
+                <a-form-item label="期望URL">
+                  <a-input
+                    v-model:value="selectedStep.params.expected"
+                    placeholder="请输入期望的URL（支持部分匹配）"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 文本断言 -->
+              <template v-else-if="selectedStep.type === 'assert_text'">
+                <a-form-item label="期望文本">
+                  <a-input
+                    v-model:value="selectedStep.params.text"
+                    placeholder="请输入期望在页面中找到的文本"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 元素存在断言 -->
+              <template v-else-if="selectedStep.type === 'assert_element'">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//div[@class='content']"
+                    :rows="2"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 元素可见断言 -->
+              <template v-else-if="selectedStep.type === 'assert_visible'">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//button[@id='submit']"
+                    :rows="2"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 元素可用断言 -->
+              <template v-else-if="selectedStep.type === 'assert_enabled'">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//input[@id='username']"
+                    :rows="2"
+                  />
+                </a-form-item>
+                <a-form-item label="期望状态">
+                  <a-radio-group v-model:value="selectedStep.params.enabled">
+                    <a-radio :value="true">可用</a-radio>
+                    <a-radio :value="false">禁用</a-radio>
+                  </a-radio-group>
+                </a-form-item>
+              </template>
+
+              <!-- 等待 -->
+              <template v-else-if="selectedStep.type === 'wait'">
+                <a-form-item label="等待类型">
+                  <a-select v-model:value="selectedStep.params.wait_type">
+                    <a-select-option value="fixed">固定时间</a-select-option>
+                    <a-select-option value="element">等待元素</a-select-option>
+                    <a-select-option value="text">等待文本</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="时长(秒)">
+                  <a-input-number
+                    v-model:value="selectedStep.params.duration"
+                    :min="0"
+                    :step="0.5"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 等待元素 -->
+              <template v-else-if="selectedStep.type === 'wait_element'">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//button[@id='submit']"
+                    :rows="2"
+                  />
+                </a-form-item>
+                <a-form-item label="超时时间(秒)">
+                  <a-input-number
+                    v-model:value="selectedStep.params.timeout"
+                    :min="1"
+                    :max="300"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 等待文本 -->
+              <template v-else-if="selectedStep.type === 'wait_text'">
+                <a-form-item label="等待的文本">
+                  <a-input
+                    v-model:value="selectedStep.params.text"
+                    placeholder="请输入等待出现的文本"
+                  />
+                </a-form-item>
+                <a-form-item label="超时时间(秒)">
+                  <a-input-number
+                    v-model:value="selectedStep.params.timeout"
+                    :min="1"
+                    :max="300"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 滚动 -->
+              <template v-else-if="selectedStep.type === 'scroll'">
+                <a-form-item label="滚动类型">
+                  <a-select v-model:value="selectedStep.params.scroll_type">
+                    <a-select-option value="top">滚动到顶部</a-select-option>
+                    <a-select-option value="bottom">滚动到底部</a-select-option>
+                    <a-select-option value="position">指定位置</a-select-option>
+                    <a-select-option value="element">滚动到元素</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item v-if="selectedStep.params.scroll_type === 'position'" label="X坐标">
+                  <a-input-number v-model:value="selectedStep.params.x" />
+                </a-form-item>
+                <a-form-item v-if="selectedStep.params.scroll_type === 'position'" label="Y坐标">
+                  <a-input-number v-model:value="selectedStep.params.y" />
+                </a-form-item>
+                <template v-if="selectedStep.params.scroll_type === 'element'">
+                  <a-form-item label="定位方式">
+                    <a-select v-model:value="selectedStep.params.locator.type">
+                      <a-select-option value="xpath">XPath</a-select-option>
+                      <a-select-option value="id">ID</a-select-option>
+                      <a-select-option value="css">CSS Selector</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                  <a-form-item label="定位值">
+                    <a-textarea
+                      v-model:value="selectedStep.params.locator.value"
+                      placeholder="//div[@id='footer']"
+                      :rows="2"
+                    />
+                  </a-form-item>
+                </template>
+              </template>
+
+              <!-- 截图 -->
+              <template v-else-if="selectedStep.type === 'screenshot'">
+                <a-form-item label="文件名前缀">
+                  <a-input
+                    v-model:value="selectedStep.params.filename"
+                    placeholder="screenshot"
+                  />
+                </a-form-item>
+                <a-form-item label="整页截图">
+                  <a-switch v-model:checked="selectedStep.params.full_page" />
+                </a-form-item>
+              </template>
+
+              <!-- 切换窗口/框架 -->
+              <template v-else-if="selectedStep.type === 'switch'">
+                <a-form-item label="切换类型">
+                  <a-select v-model:value="selectedStep.params.switch_type">
+                    <a-select-option value="window">切换窗口</a-select-option>
+                    <a-select-option value="frame">切换iframe</a-select-option>
+                    <a-select-option value="default">返回主文档</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item v-if="selectedStep.params.switch_type !== 'default'" label="名称或索引">
+                  <a-input
+                    v-model:value="selectedStep.params.name_or_index"
+                    placeholder="窗口名称或iframe索引"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 按键 -->
+              <template v-else-if="selectedStep.type === 'press_key'">
+                <a-form-item label="按键">
+                  <a-select v-model:value="selectedStep.params.key" show-search>
+                    <a-select-option value="ENTER">Enter</a-select-option>
+                    <a-select-option value="TAB">Tab</a-select-option>
+                    <a-select-option value="ESCAPE">Esc</a-select-option>
+                    <a-select-option value="SPACE">Space</a-select-option>
+                    <a-select-option value="BACKSPACE">Backspace</a-select-option>
+                    <a-select-option value="DELETE">Delete</a-select-option>
+                    <a-select-option value="HOME">Home</a-select-option>
+                    <a-select-option value="END">End</a-select-option>
+                    <a-select-option value="ARROW_UP">↑ 上</a-select-option>
+                    <a-select-option value="ARROW_DOWN">↓ 下</a-select-option>
+                    <a-select-option value="ARROW_LEFT">← 左</a-select-option>
+                    <a-select-option value="ARROW_RIGHT">→ 右</a-select-option>
+                    <a-select-option value="F1">F1</a-select-option>
+                    <a-select-option value="F5">F5</a-select-option>
+                    <a-select-option value="F12">F12</a-select-option>
+                  </a-select>
+                </a-form-item>
+              </template>
+
+              <!-- 组合键 -->
+              <template v-else-if="selectedStep.type === 'press_keys'">
+                <a-form-item label="组合键">
+                  <a-input
+                    v-model:value="selectedStep.params.keys"
+                    placeholder="如: CTRL+C, ALT+F4"
+                  />
+                </a-form-item>
+                <a-alert message="示例: CTRL+A, CTRL+C, CTRL+V, SHIFT+TAB, ALT+F4" type="info" show-icon />
+              </template>
+
+              <!-- Cookie操作 -->
+              <template v-else-if="selectedStep.type === 'get_cookie'">
+                <a-form-item label="Cookie名称">
+                  <a-input
+                    v-model:value="selectedStep.params.name"
+                    placeholder="留空获取所有Cookie"
+                  />
+                </a-form-item>
+                <a-form-item label="保存到变量">
+                  <a-input
+                    v-model:value="selectedStep.params.var_name"
+                    placeholder="变量名（可选）"
+                  />
+                </a-form-item>
+              </template>
+
+              <template v-else-if="selectedStep.type === 'set_cookie'">
+                <a-form-item label="Cookie名称">
+                  <a-input v-model:value="selectedStep.params.name" />
+                </a-form-item>
+                <a-form-item label="Cookie值">
+                  <a-input v-model:value="selectedStep.params.value" />
+                </a-form-item>
+                <a-form-item label="Domain">
+                  <a-input v-model:value="selectedStep.params.domain" placeholder="可选" />
+                </a-form-item>
+                <a-form-item label="Path">
+                  <a-input v-model:value="selectedStep.params.path" placeholder="可选" />
+                </a-form-item>
+              </template>
+
+              <!-- 存储操作 -->
+              <template v-else-if="selectedStep.type === 'get_storage'">
+                <a-form-item label="存储类型">
+                  <a-select v-model:value="selectedStep.params.type">
+                    <a-select-option value="localStorage">Local Storage</a-select-option>
+                    <a-select-option value="sessionStorage">Session Storage</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="键名">
+                  <a-input
+                    v-model:value="selectedStep.params.key"
+                    placeholder="留空获取所有"
+                  />
+                </a-form-item>
+                <a-form-item label="保存到变量">
+                  <a-input v-model:value="selectedStep.params.var_name" />
+                </a-form-item>
+              </template>
+
+              <template v-else-if="selectedStep.type === 'set_storage'">
+                <a-form-item label="存储类型">
+                  <a-select v-model:value="selectedStep.params.type">
+                    <a-select-option value="localStorage">Local Storage</a-select-option>
+                    <a-select-option value="sessionStorage">Session Storage</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="键名">
+                  <a-input v-model:value="selectedStep.params.key" />
+                </a-form-item>
+                <a-form-item label="值">
+                  <a-textarea v-model:value="selectedStep.params.value" :rows="3" />
+                </a-form-item>
+              </template>
+
+              <!-- 提取数据 -->
+              <template v-else-if="selectedStep.type === 'extract'">
+                <a-form-item label="变量名">
+                  <a-input v-model:value="selectedStep.params.name" />
+                </a-form-item>
+                <a-form-item label="提取来源">
+                  <a-select v-model:value="selectedStep.params.source">
+                    <a-select-option value="text">元素文本</a-select-option>
+                    <a-select-option value="attribute">元素属性</a-select-option>
+                    <a-select-option value="url">当前URL</a-select-option>
+                    <a-select-option value="title">页面标题</a-select-option>
+                    <a-select-option value="cookie">Cookie</a-select-option>
+                    <a-select-option value="storage">存储</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <template v-if="['text', 'attribute'].includes(selectedStep.params.source)">
+                  <a-form-item label="定位方式">
+                    <a-select v-model:value="selectedStep.params.locator.type">
+                      <a-select-option value="xpath">XPath</a-select-option>
+                      <a-select-option value="id">ID</a-select-option>
+                      <a-select-option value="css">CSS Selector</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                  <a-form-item label="定位值">
+                    <a-textarea
+                      v-model:value="selectedStep.params.locator.value"
+                      :rows="2"
+                    />
+                  </a-form-item>
+                </template>
+                <a-form-item v-if="selectedStep.params.source === 'attribute'" label="属性名">
+                  <a-input v-model:value="selectedStep.params.attribute" placeholder="href, value等" />
+                </a-form-item>
+                <a-form-item v-if="selectedStep.params.source === 'cookie'" label="Cookie名称">
+                  <a-input v-model:value="selectedStep.params.key" />
+                </a-form-item>
+                <template v-if="selectedStep.params.source === 'storage'">
+                  <a-form-item label="存储类型">
+                    <a-select v-model:value="selectedStep.params.storage_type">
+                      <a-select-option value="localStorage">Local Storage</a-select-option>
+                      <a-select-option value="sessionStorage">Session Storage</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                  <a-form-item label="键名">
+                    <a-input v-model:value="selectedStep.params.key" />
+                  </a-form-item>
+                </template>
+              </template>
+
+              <!-- 执行脚本 -->
+              <template v-else-if="selectedStep.type === 'execute_script'">
+                <a-form-item label="JavaScript代码">
+                  <a-textarea
+                    v-model:value="selectedStep.params.script"
+                    placeholder="return document.title;"
+                    :rows="6"
+                  />
+                </a-form-item>
+                <a-form-item label="保存到变量">
+                  <a-input
+                    v-model:value="selectedStep.params.var_name"
+                    placeholder="变量名（可选）"
+                  />
+                </a-form-item>
+              </template>
+
+              <template v-else-if="selectedStep.type === 'execute_async_script'">
+                <a-form-item label="异步JavaScript代码">
+                  <a-textarea
+                    v-model:value="selectedStep.params.script"
+                    placeholder="var callback = arguments[arguments.length - 1]; setTimeout(function() { callback('done'); }, 1000);"
+                    :rows="6"
+                  />
+                </a-form-item>
+                <a-form-item label="保存到变量">
+                  <a-input v-model:value="selectedStep.params.var_name" />
+                </a-form-item>
+              </template>
+
+              <!-- 切换iframe -->
+              <template v-else-if="selectedStep.type === 'iframe'">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="name">Name</a-select-option>
+                    <a-select-option value="css">CSS Selector</a-select-option>
+                    <a-select-option value="index">索引</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    placeholder="//iframe[@id='myframe']"
+                    :rows="2"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 处理弹窗 -->
+              <template v-else-if="selectedStep.type === 'alert'">
+                <a-form-item label="操作">
+                  <a-select v-model:value="selectedStep.params.action">
+                    <a-select-option value="accept">确定</a-select-option>
+                    <a-select-option value="dismiss">取消</a-select-option>
+                    <a-select-option value="send_keys">输入文本</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item v-if="selectedStep.params.action === 'send_keys'" label="输入文本">
+                  <a-input v-model:value="selectedStep.params.text" />
+                </a-form-item>
+              </template>
+
+              <!-- 新标签 -->
+              <template v-else-if="selectedStep.type === 'new_tab'">
+                <a-form-item label="URL">
+                  <a-input
+                    v-model:value="selectedStep.params.url"
+                    placeholder="https://example.com"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- API测试步骤 -->
+
+              <!-- HTTP请求 -->
+              <template v-else-if="selectedStep.type === 'http_request'">
+                <a-form-item label="请求方法">
+                  <a-select v-model:value="selectedStep.params.method">
+                    <a-select-option value="GET">GET</a-select-option>
+                    <a-select-option value="POST">POST</a-select-option>
+                    <a-select-option value="PUT">PUT</a-select-option>
+                    <a-select-option value="DELETE">DELETE</a-select-option>
+                    <a-select-option value="PATCH">PATCH</a-select-option>
+                    <a-select-option value="HEAD">HEAD</a-select-option>
+                    <a-select-option value="OPTIONS">OPTIONS</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="URL">
+                  <a-input
+                    v-model:value="selectedStep.params.url"
+                    placeholder="https://api.example.com/endpoint"
+                  />
+                </a-form-item>
+                <a-form-item label="请求头 (JSON)">
+                  <a-textarea
+                    v-model:value="headersJson"
+                    placeholder='{"Content-Type": "application/json"}'
+                    :rows="3"
+                  />
+                </a-form-item>
+                <a-form-item v-if="['POST', 'PUT', 'PATCH'].includes(selectedStep.params.method)" label="请求体">
+                  <a-textarea
+                    v-model:value="selectedStep.params.body"
+                    placeholder='{"key": "value"}'
+                    :rows="5"
+                  />
+                </a-form-item>
+                <a-form-item label="超时时间(秒)">
+                  <a-input-number v-model:value="selectedStep.params.timeout" :min="1" :max="300" />
+                </a-form-item>
+              </template>
+
+              <!-- GraphQL请求 -->
+              <template v-else-if="selectedStep.type === 'graphql_request'">
+                <a-form-item label="URL">
+                  <a-input
+                    v-model:value="selectedStep.params.url"
+                    placeholder="https://api.example.com/graphql"
+                  />
+                </a-form-item>
+                <a-form-item label="Query">
+                  <a-textarea
+                    v-model:value="selectedStep.params.query"
+                    placeholder="query { user { id name } }"
+                    :rows="6"
+                  />
+                </a-form-item>
+                <a-form-item label="Variables (JSON)">
+                  <a-textarea
+                    v-model:value="variablesJson"
+                    placeholder='{"userId": "123"}'
+                    :rows="3"
+                  />
+                </a-form-item>
+                <a-form-item label="请求头 (JSON)">
+                  <a-textarea
+                    v-model:value="headersJson"
+                    placeholder='{"Content-Type": "application/json"}'
+                    :rows="3"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 验证状态码 -->
+              <template v-else-if="selectedStep.type === 'assert_status'">
+                <a-form-item label="比较方式">
+                  <a-select v-model:value="selectedStep.params.operator">
+                    <a-select-option value="equals">等于</a-select-option>
+                    <a-select-option value="not_equals">不等于</a-select-option>
+                    <a-select-option value="greater_than">大于</a-select-option>
+                    <a-select-option value="less_than">小于</a-select-option>
+                    <a-select-option value="in">在范围内</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="期望状态码">
+                  <a-input-number v-model:value="selectedStep.params.expected" :min="100" :max="599" />
+                </a-form-item>
+              </template>
+
+              <!-- 验证响应头 -->
+              <template v-else-if="selectedStep.type === 'assert_header'">
+                <a-form-item label="响应头名称">
+                  <a-input v-model:value="selectedStep.params.header" placeholder="Content-Type" />
+                </a-form-item>
+                <a-form-item label="比较方式">
+                  <a-select v-model:value="selectedStep.params.operator">
+                    <a-select-option value="equals">等于</a-select-option>
+                    <a-select-option value="contains">包含</a-select-option>
+                    <a-select-option value="not_contains">不包含</a-select-option>
+                    <a-select-option value="regex">正则匹配</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="期望值">
+                  <a-input v-model:value="selectedStep.params.expected" placeholder="application/json" />
+                </a-form-item>
+              </template>
+
+              <!-- 验证响应体 -->
+              <template v-else-if="selectedStep.type === 'assert_body'">
+                <a-form-item label="比较方式">
+                  <a-select v-model:value="selectedStep.params.operator">
+                    <a-select-option value="equals">等于</a-select-option>
+                    <a-select-option value="contains">包含</a-select-option>
+                    <a-select-option value="not_contains">不包含</a-select-option>
+                    <a-select-option value="regex">正则匹配</a-select-option>
+                    <a-select-option value="json_schema">JSON Schema</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="期望值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.expected"
+                    placeholder="期望的响应内容"
+                    :rows="4"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 验证JSON路径 -->
+              <template v-else-if="selectedStep.type === 'assert_json_path'">
+                <a-form-item label="JSON路径">
+                  <a-input
+                    v-model:value="selectedStep.params.path"
+                    placeholder="$.data.user.id"
+                  />
+                </a-form-item>
+                <a-form-item label="比较方式">
+                  <a-select v-model:value="selectedStep.params.operator">
+                    <a-select-option value="equals">等于</a-select-option>
+                    <a-select-option value="not_equals">不等于</a-select-option>
+                    <a-select-option value="contains">包含</a-select-option>
+                    <a-select-option value="exists">存在</a-select-option>
+                    <a-select-option value="greater_than">大于</a-select-option>
+                    <a-select-option value="less_than">小于</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item v-if="selectedStep.params.operator !== 'exists'" label="期望值">
+                  <a-input v-model:value="selectedStep.params.expected" />
+                </a-form-item>
+              </template>
+
+              <!-- 验证响应时间 -->
+              <template v-else-if="selectedStep.type === 'assert_response_time'">
+                <a-form-item label="比较方式">
+                  <a-select v-model:value="selectedStep.params.operator">
+                    <a-select-option value="less_than">小于</a-select-option>
+                    <a-select-option value="greater_than">大于</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="期望时间(毫秒)">
+                  <a-input-number v-model:value="selectedStep.params.expected" :min="1" />
+                </a-form-item>
+              </template>
+
+              <!-- 提取JSON路径 -->
+              <template v-else-if="selectedStep.type === 'extract_json_path'">
+                <a-form-item label="JSON路径">
+                  <a-input
+                    v-model:value="selectedStep.params.path"
+                    placeholder="$.data.token"
+                  />
+                </a-form-item>
+                <a-form-item label="保存到变量">
+                  <a-input v-model:value="selectedStep.params.variable_name" placeholder="token" />
+                </a-form-item>
+              </template>
+
+              <!-- 提取响应头 -->
+              <template v-else-if="selectedStep.type === 'extract_header'">
+                <a-form-item label="响应头名称">
+                  <a-input v-model:value="selectedStep.params.header" placeholder="Set-Cookie" />
+                </a-form-item>
+                <a-form-item label="保存到变量">
+                  <a-input v-model:value="selectedStep.params.variable_name" placeholder="cookie_value" />
+                </a-form-item>
+              </template>
+
+              <!-- 设置请求头 -->
+              <template v-else-if="selectedStep.type === 'set_header'">
+                <a-form-item label="请求头 (JSON)">
+                  <a-textarea
+                    v-model:value="setHeaderJson"
+                    placeholder='{"Authorization": "Bearer token"}'
+                    :rows="4"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 设置认证 -->
+              <template v-else-if="selectedStep.type === 'set_auth'">
+                <a-form-item label="认证类型">
+                  <a-select v-model:value="selectedStep.params.type">
+                    <a-select-option value="none">无</a-select-option>
+                    <a-select-option value="basic">Basic Auth</a-select-option>
+                    <a-select-option value="bearer">Bearer Token</a-select-option>
+                    <a-select-option value="api_key">API Key</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <template v-if="selectedStep.params.type === 'basic'">
+                  <a-form-item label="用户名">
+                    <a-input v-model:value="selectedStep.params.username" />
+                  </a-form-item>
+                  <a-form-item label="密码">
+                    <a-input-password v-model:value="selectedStep.params.password" />
+                  </a-form-item>
+                </template>
+                <template v-if="selectedStep.params.type === 'bearer'">
+                  <a-form-item label="Token">
+                    <a-input v-model:value="selectedStep.params.token" />
+                  </a-form-item>
+                </template>
+                <template v-if="selectedStep.params.type === 'api_key'">
+                  <a-form-item label="Key名称">
+                    <a-input v-model:value="selectedStep.params.key_name" placeholder="X-API-Key" />
+                  </a-form-item>
+                  <a-form-item label="Key值">
+                    <a-input v-model:value="selectedStep.params.key_value" />
+                  </a-form-item>
+                  <a-form-item label="位置">
+                    <a-select v-model:value="selectedStep.params.location">
+                      <a-select-option value="header">Header</a-select-option>
+                      <a-select-option value="query">Query</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </template>
+              </template>
+
+              <!-- 移动端测试步骤 -->
+
+              <!-- 安装应用 -->
+              <template v-else-if="selectedStep.type === 'install_app'">
+                <a-form-item label="应用路径">
+                  <a-input
+                    v-model:value="selectedStep.params.app_path"
+                    placeholder="/path/to/app.apk or /path/to/app.ipa"
+                  />
+                </a-form-item>
+                <a-form-item label="Package (iOS)">
+                  <a-input
+                    v-model:value="selectedStep.params.package"
+                    placeholder="com.example.app"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 启动应用 -->
+              <template v-else-if="selectedStep.type === 'launch_app'">
+                <a-form-item label="Package/Bundle ID">
+                  <a-input
+                    v-model:value="selectedStep.params.package"
+                    placeholder="com.example.app"
+                  />
+                </a-form-item>
+                <a-form-item label="Activity (Android可选)">
+                  <a-input
+                    v-model:value="selectedStep.params.activity"
+                    placeholder=".MainActivity"
+                  />
+                </a-form-item>
+              </template>
+
+              <!-- 点击坐标 -->
+              <template v-else-if="selectedStep.type === 'tap_coordinates'">
+                <a-form-item label="X坐标">
+                  <a-input-number v-model:value="selectedStep.params.x" />
+                </a-form-item>
+                <a-form-item label="Y坐标">
+                  <a-input-number v-model:value="selectedStep.params.y" />
+                </a-form-item>
+              </template>
+
+              <!-- 长按 -->
+              <template v-else-if="selectedStep.type === 'long_press'">
+                <a-form-item label="定位方式">
+                  <a-select v-model:value="selectedStep.params.locator.type">
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="xpath">XPath</a-select-option>
+                    <a-select-option value="class">Class</a-select-option>
+                    <a-select-option value="android">Android UiAutomator</a-select-option>
+                    <a-select-option value="ios">iOS Predicate</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="定位值">
+                  <a-textarea
+                    v-model:value="selectedStep.params.locator.value"
+                    :rows="2"
+                  />
+                </a-form-item>
+                <a-form-item label="持续时间(毫秒)">
+                  <a-input-number v-model:value="selectedStep.params.duration" :min="500" :max="10000" />
+                </a-form-item>
+              </template>
+
+              <!-- 滑动 -->
+              <template v-else-if="selectedStep.type === 'swipe'">
+                <a-form-item label="起始X坐标">
+                  <a-input-number v-model:value="selectedStep.params.start_x" />
+                </a-form-item>
+                <a-form-item label="起始Y坐标">
+                  <a-input-number v-model:value="selectedStep.params.start_y" />
+                </a-form-item>
+                <a-form-item label="结束X坐标">
+                  <a-input-number v-model:value="selectedStep.params.end_x" />
+                </a-form-item>
+                <a-form-item label="结束Y坐标">
+                  <a-input-number v-model:value="selectedStep.params.end_y" />
+                </a-form-item>
+                <a-form-item label="持续时间(毫秒)">
+                  <a-input-number v-model:value="selectedStep.params.duration" :min="100" :max="5000" />
+                </a-form-item>
+              </template>
+
+              <!-- 移动端滚动 -->
+              <template v-else-if="selectedStep.type === 'scroll_mobile'">
+                <a-form-item label="滚动方向">
+                  <a-select v-model:value="selectedStep.params.direction">
+                    <a-select-option value="up">向上</a-select-option>
+                    <a-select-option value="down">向下</a-select-option>
+                    <a-select-option value="left">向左</a-select-option>
+                    <a-select-option value="right">向右</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="滚动距离">
+                  <a-input-number v-model:value="selectedStep.params.distance" :min="100" />
+                </a-form-item>
+              </template>
+
+              <!-- 双指缩放 -->
+              <template v-else-if="selectedStep.type === 'pinch'">
+                <a-form-item label="缩放方向">
+                  <a-select v-model:value="selectedStep.params.direction">
+                    <a-select-option value="in">缩小</a-select-option>
+                    <a-select-option value="out">放大</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="缩放百分比">
+                  <a-input-number v-model:value="selectedStep.params.percent" :min="10" :max="100" />
+                </a-form-item>
+                <a-form-item label="持续时间(毫秒)">
+                  <a-input-number v-model:value="selectedStep.params.duration" :min="100" :max="3000" />
+                </a-form-item>
+              </template>
+
+              <!-- 拖拽 -->
+              <template v-else-if="selectedStep.type === 'drag'">
+                <a-form-item label="起始元素定位方式">
+                  <a-select v-model:value="selectedStep.params.start_element.type">
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="xpath">XPath</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="起始元素定位值">
+                  <a-input v-model:value="selectedStep.params.start_element.value" />
+                </a-form-item>
+                <a-form-item label="目标元素定位方式">
+                  <a-select v-model:value="selectedStep.params.end_element.type">
+                    <a-select-option value="id">ID</a-select-option>
+                    <a-select-option value="xpath">XPath</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="目标元素定位值">
+                  <a-input v-model:value="selectedStep.params.end_element.value" />
+                </a-form-item>
+                <a-form-item label="持续时间(毫秒)">
+                  <a-input-number v-model:value="selectedStep.params.duration" :min="100" :max="5000" />
+                </a-form-item>
+              </template>
+
+              <!-- 旋转屏幕 -->
+              <template v-else-if="selectedStep.type === 'rotate'">
+                <a-form-item label="屏幕方向">
+                  <a-select v-model:value="selectedStep.params.orientation">
+                    <a-select-option value="portrait">竖屏</a-select-option>
+                    <a-select-option value="landscape">横屏</a-select-option>
+                  </a-select>
+                </a-form-item>
+              </template>
+
+              <!-- 锁屏/解锁 -->
+              <template v-else-if="selectedStep.type === 'lock'">
+                <a-form-item label="操作">
+                  <a-select v-model:value="selectedStep.params.action">
+                    <a-select-option value="lock">锁屏</a-select-option>
+                    <a-select-option value="unlock">解锁</a-select-option>
+                  </a-select>
+                </a-form-item>
+              </template>
+
+              <!-- 后台运行 -->
+              <template v-else-if="selectedStep.type === 'background_app'">
+                <a-form-item label="持续时间(秒)">
+                  <a-input-number v-model:value="selectedStep.params.duration" :min="0" />
+                </a-form-item>
+              </template>
+
+              <!-- 其他步骤类型的通用参数 -->
+              <template v-else>
+                <a-form-item label="参数 (JSON)">
+                  <a-textarea
+                    v-model:value="paramsJson"
+                    :rows="6"
+                    placeholder='{"key": "value"}'
+                  />
+                </a-form-item>
+              </template>
+            </a-form>
+          </div>
+          <a-empty v-else description="请选择步骤" :image="Empty.PRESENTED_IMAGE_SIMPLE" />
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import { message } from 'ant-design-vue'
+import draggable from 'vuedraggable'
+import { Empty } from 'ant-design-vue'
+import {
+  SaveOutlined,
+  PlayCircleOutlined,
+  ClearOutlined,
+  DeleteOutlined,
+  HolderOutlined,
+  CloseOutlined,
+  ApartmentOutlined,
+  ClickOutlined,
+  InputOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  VerticalAlignBottomOutlined,
+  CameraOutlined,
+  CodeOutlined,
+  AppstoreOutlined,
+  GlobalOutlined,
+  ApiOutlined,
+  MouseOutlined,
+  InteractionOutlined,
+  AimOutlined,
+  UploadOutlined,
+  SelectOutlined,
+  CheckSquareOutlined,
+  RadioOutlined,
+  KeyboardOutlined,
+  FileTextOutlined,
+  LinkOutlined,
+  SearchOutlined,
+  EyeOutlined,
+  EyeFilled,
+  UnlockOutlined,
+  HourglassOutlined,
+  FontSizeOutlined,
+  CookieOutlined,
+  DatabaseOutlined,
+  ExportOutlined,
+  CodeSandboxOutlined,
+  AlertOutlined,
+  PlusSquareOutlined,
+  CloseSquareOutlined,
+  ReloadOutlined,
+  RollbackOutlined,
+  ForwardOutlined,
+  RequestOutlined,
+  ResponseOutlined,
+  SwipeOutlined,
+  TouchOutlined,
+  JsonPathOutlined,
+  AuthOutlined,
+  InstallOutlined,
+  AppAddOutlined,
+  GestureOutlined,
+  ScrollMobileOutlined
+} from '@/components/icons'
+
+export interface TestStep {
+  id: string
+  type: string
+  name: string
+  params: Record<string, any>
+  description?: string
+}
+
+interface Props {
+  modelValue: TestStep[]
+  modules?: any[]
+  saving?: boolean
+  scriptType?: 'web' | 'mobile' | 'api'
+}
+
+interface Emits {
+  (e: 'update:modelValue', value: TestStep[]): void
+  (e: 'save'): void
+  (e: 'run'): void
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  modules: () => [],
+  saving: false,
+  scriptType: 'web'
+})
+
+const emit = defineEmits<Emits>()
+
+const steps = computed({
+  get: () => props.modelValue,
+  set: (value) => emit('update:modelValue', value)
+})
+
+const selectedStepId = ref<string | null>(null)
+const selectedStep = ref<TestStep | null>(null)
+
+const paramsJson = computed({
+  get: () => selectedStep.value ? JSON.stringify(selectedStep.value.params, null, 2) : '',
+  set: (value) => {
+    if (selectedStep.value) {
+      try {
+        selectedStep.value.params = JSON.parse(value)
+      } catch (e) {
+        // Ignore JSON parse errors while typing
+      }
+    }
+  }
+})
+
+// 处理headers的JSON字符串转换
+const headersJson = computed({
+  get: () => {
+    if (selectedStep.value && selectedStep.value.params.headers) {
+      return JSON.stringify(selectedStep.value.params.headers, null, 2)
+    }
+    return '{\n  "Content-Type": "application/json"\n}'
+  },
+  set: (value) => {
+    if (selectedStep.value) {
+      try {
+        selectedStep.value.params.headers = JSON.parse(value)
+      } catch (e) {
+        // Ignore JSON parse errors while typing
+      }
+    }
+  }
+})
+
+// 处理variables的JSON字符串转换
+const variablesJson = computed({
+  get: () => {
+    if (selectedStep.value && selectedStep.value.params.variables) {
+      return JSON.stringify(selectedStep.value.params.variables, null, 2)
+    }
+    return '{}'
+  },
+  set: (value) => {
+    if (selectedStep.value) {
+      try {
+        selectedStep.value.params.variables = JSON.parse(value)
+      } catch (e) {
+        // Ignore JSON parse errors while typing
+      }
+    }
+  }
+})
+
+// 处理set_header步骤的headers JSON字符串转换
+const setHeaderJson = computed({
+  get: () => {
+    if (selectedStep.value && selectedStep.value.type === 'set_header') {
+      return JSON.stringify(selectedStep.value.params, null, 2)
+    }
+    return '{}'
+  },
+  set: (value) => {
+    if (selectedStep.value) {
+      try {
+        selectedStep.value.params = JSON.parse(value)
+      } catch (e) {
+        // Ignore JSON parse errors while typing
+      }
+    }
+  }
+})
+
+const stepCategories = computed(() => {
+  // Web自动化步骤
+  const webSteps = [
+    {
+      name: 'navigation',
+      label: '页面控制',
+      steps: [
+        { type: 'goto', label: '打开页面', icon: GlobalOutlined },
+        { type: 'scroll', label: '滚动页面', icon: VerticalAlignBottomOutlined },
+        { type: 'switch', label: '切换窗口/框架', icon: ApartmentOutlined },
+        { type: 'refresh', label: '刷新页面', icon: ReloadOutlined },
+        { type: 'back', label: '后退', icon: RollbackOutlined },
+        { type: 'forward', label: '前进', icon: ForwardOutlined }
+      ]
+    },
+    {
+      name: 'interaction',
+      label: '交互操作',
+      steps: [
+        { type: 'click', label: '点击', icon: ClickOutlined },
+        { type: 'double_click', label: '双击', icon: MouseOutlined },
+        { type: 'right_click', label: '右键点击', icon: InteractionOutlined },
+        { type: 'hover', label: '鼠标悬停', icon: AimOutlined },
+        { type: 'input', label: '输入文本', icon: InputOutlined },
+        { type: 'clear', label: '清空输入', icon: ClearOutlined },
+        { type: 'upload', label: '上传文件', icon: UploadOutlined },
+        { type: 'select', label: '下拉选择', icon: SelectOutlined },
+        { type: 'checkbox', label: '复选框', icon: CheckSquareOutlined },
+        { type: 'radio', label: '单选框', icon: RadioOutlined },
+        { type: 'screenshot', label: '截图', icon: CameraOutlined }
+      ]
+    },
+    {
+      name: 'keyboard',
+      label: '键盘操作',
+      steps: [
+        { type: 'press_key', label: '按键', icon: KeyboardOutlined },
+        { type: 'press_keys', label: '组合键', icon: ApiOutlined }
+      ]
+    },
+    {
+      name: 'assertion',
+      label: '断言验证',
+      steps: [
+        { type: 'assert', label: '断言', icon: CheckCircleOutlined },
+        { type: 'assert_title', label: '验证标题', icon: FileTextOutlined },
+        { type: 'assert_url', label: '验证URL', icon: LinkOutlined },
+        { type: 'assert_text', label: '验证文本存在', icon: SearchOutlined },
+        { type: 'assert_element', label: '验证元素存在', icon: EyeOutlined },
+        { type: 'assert_visible', label: '验证元素可见', icon: EyeFilled },
+        { type: 'assert_enabled', label: '验证元素可用', icon: UnlockOutlined }
+      ]
+    },
+    {
+      name: 'wait',
+      label: '等待',
+      steps: [
+        { type: 'wait', label: '等待', icon: ClockCircleOutlined },
+        { type: 'wait_element', label: '等待元素', icon: HourglassOutlined },
+        { type: 'wait_text', label: '等待文本', icon: FontSizeOutlined }
+      ]
+    },
+    {
+      name: 'data',
+      label: '数据操作',
+      steps: [
+        { type: 'get_cookie', label: '获取Cookie', icon: CookieOutlined },
+        { type: 'set_cookie', label: '设置Cookie', icon: SaveOutlined },
+        { type: 'get_storage', label: '获取存储', icon: DatabaseOutlined },
+        { type: 'set_storage', label: '设置存储', icon: DatabaseOutlined },
+        { type: 'extract', label: '提取数据', icon: ExportOutlined }
+      ]
+    },
+    {
+      name: 'advanced',
+      label: '高级',
+      steps: [
+        { type: 'execute_script', label: '执行脚本', icon: CodeOutlined },
+        { type: 'execute_async_script', label: '执行异步脚本', icon: CodeSandboxOutlined },
+        { type: 'iframe', label: '切换iframe', icon: ApartmentOutlined },
+        { type: 'alert', label: '处理弹窗', icon: AlertOutlined },
+        { type: 'new_tab', label: '打开新标签', icon: PlusSquareOutlined },
+        { type: 'close_tab', label: '关闭标签', icon: CloseSquareOutlined }
+      ]
+    }
+  ]
+
+  // API测试步骤
+  const apiSteps = [
+    {
+      name: 'request',
+      label: 'API请求',
+      steps: [
+        { type: 'http_request', label: 'HTTP请求', icon: RequestOutlined },
+        { type: 'graphql_request', label: 'GraphQL请求', icon: ApiOutlined }
+      ]
+    },
+    {
+      name: 'assertion',
+      label: '断言验证',
+      steps: [
+        { type: 'assert_status', label: '验证状态码', icon: CheckCircleOutlined },
+        { type: 'assert_header', label: '验证响应头', icon: FileTextOutlined },
+        { type: 'assert_body', label: '验证响应体', icon: ResponseOutlined },
+        { type: 'assert_json_path', label: '验证JSON路径', icon: JsonPathOutlined },
+        { type: 'assert_response_time', label: '验证响应时间', icon: ClockCircleOutlined }
+      ]
+    },
+    {
+      name: 'extraction',
+      label: '数据提取',
+      steps: [
+        { type: 'extract_json_path', label: '提取JSON路径', icon: JsonPathOutlined },
+        { type: 'extract_header', label: '提取响应头', icon: ExportOutlined },
+        { type: 'extract_cookie', label: '提取Cookie', icon: CookieOutlined }
+      ]
+    },
+    {
+      name: 'config',
+      label: '请求配置',
+      steps: [
+        { type: 'set_header', label: '设置请求头', icon: FileTextOutlined },
+        { type: 'set_auth', label: '设置认证', icon: AuthOutlined },
+        { type: 'set_body', label: '设置请求体', icon: CodeOutlined }
+      ]
+    },
+    {
+      name: 'wait',
+      label: '等待',
+      steps: [
+        { type: 'wait', label: '等待', icon: ClockCircleOutlined }
+      ]
+    }
+  ]
+
+  // 移动端测试步骤
+  const mobileSteps = [
+    {
+      name: 'app_control',
+      label: '应用控制',
+      steps: [
+        { type: 'install_app', label: '安装应用', icon: InstallOutlined },
+        { type: 'launch_app', label: '启动应用', icon: AppAddOutlined },
+        { type: 'close_app', label: '关闭应用', icon: CloseSquareOutlined },
+        { type: 'reset_app', label: '重置应用', icon: ReloadOutlined },
+        { type: 'background_app', label: '后台运行', icon: AppstoreOutlined }
+      ]
+    },
+    {
+      name: 'touch',
+      label: '触控操作',
+      steps: [
+        { type: 'tap', label: '点击', icon: TouchOutlined },
+        { type: 'tap_coordinates', label: '点击坐标', icon: AimOutlined },
+        { type: 'long_press', label: '长按', icon: GestureOutlined },
+        { type: 'swipe', label: '滑动', icon: SwipeOutlined },
+        { type: 'scroll_mobile', label: '滚动', icon: ScrollMobileOutlined },
+        { type: 'pinch', label: '双指缩放', icon: ZoomInOutlined },
+        { type: 'drag', label: '拖拽', icon: ApartmentOutlined }
+      ]
+    },
+    {
+      name: 'device',
+      label: '设备操作',
+      steps: [
+        { type: 'rotate', label: '旋转屏幕', icon: RotateLeftOutlined },
+        { type: 'lock', label: '锁屏/解锁', icon: LockOutlined },
+        { type: 'press_back', label: '返回键', icon: RollbackOutlined },
+        { type: 'press_home', label: 'Home键', icon: HomeOutlined },
+        { type: 'get_device_info', label: '获取设备信息', icon: AppstoreOutlined },
+        { type: 'screenshot', label: '截图', icon: CameraOutlined }
+      ]
+    },
+    {
+      name: 'element',
+      label: '元素操作',
+      steps: [
+        { type: 'click', label: '点击元素', icon: ClickOutlined },
+        { type: 'input', label: '输入文本', icon: InputOutlined },
+        { type: 'clear', label: '清空输入', icon: ClearOutlined },
+        { type: 'select', label: '下拉选择', icon: SelectOutlined }
+      ]
+    },
+    {
+      name: 'assertion',
+      label: '断言验证',
+      steps: [
+        { type: 'assert', label: '断言', icon: CheckCircleOutlined },
+        { type: 'assert_element', label: '验证元素存在', icon: EyeOutlined },
+        { type: 'assert_text', label: '验证文本存在', icon: SearchOutlined },
+        { type: 'assert_visible', label: '验证元素可见', icon: EyeFilled }
+      ]
+    },
+    {
+      name: 'wait',
+      label: '等待',
+      steps: [
+        { type: 'wait', label: '等待', icon: ClockCircleOutlined },
+        { type: 'wait_element', label: '等待元素', icon: HourglassOutlined }
+      ]
+    }
+  ]
+
+  // 根据脚本类型返回对应的步骤
+  if (props.scriptType === 'api') {
+    return apiSteps
+  } else if (props.scriptType === 'mobile') {
+    return mobileSteps
+  } else {
+    return webSteps
+  }
+})
+
+function handleDragStart(event: DragEvent, step: any) {
+  if (event.dataTransfer) {
+    event.dataTransfer.setData('application/json', JSON.stringify({
+      type: step.type,
+      label: step.label || step.module_name || step.name,
+      ...step
+    }))
+  }
+}
+
+function handleDrop(event: DragEvent) {
+  event.preventDefault()
+  const data = event.dataTransfer?.getData('application/json')
+  if (!data) return
+
+  const stepData = JSON.parse(data)
+
+  // 创建新步骤
+  const newStep: TestStep = {
+    id: `step_${Date.now()}`,
+    type: stepData.type,
+    name: stepData.label || stepData.name || '未命名步骤',
+    params: getDefaultParams(stepData.type)
+  }
+
+  // 如果是模块，添加module_id
+  if (stepData.type === 'module') {
+    newStep.params.module_id = stepData.id
+    newStep.params.module_name = stepData.module_name || stepData.name
+  }
+
+  steps.value = [...steps.value, newStep]
+  selectStep(newStep)
+}
+
+function handleDragEnd() {
+  // 拖拽结束，steps已通过v-model自动更新
+}
+
+function getDefaultParams(type: string): Record<string, any> {
+  const defaults: Record<string, any> = {
+    // Web自动化步骤
+    goto: { url: '' },
+    click: { locator: { type: 'xpath', value: '' } },
+    double_click: { locator: { type: 'xpath', value: '' } },
+    right_click: { locator: { type: 'xpath', value: '' } },
+    hover: { locator: { type: 'xpath', value: '' } },
+    input: { locator: { type: 'xpath', value: '' }, value: '', clear_first: true },
+    clear: { locator: { type: 'xpath', value: '' } },
+    upload: { locator: { type: 'xpath', value: '' }, file_path: '' },
+    select: { locator: { type: 'xpath', value: '' }, value: '', by_value: true },
+    checkbox: { locator: { type: 'xpath', value: '' }, checked: true },
+    radio: { locator: { type: 'xpath', value: '' } },
+    assert: { assert_type: 'text', locator: { type: 'xpath', value: '' }, expected: '' },
+    assert_title: { expected: '' },
+    assert_url: { expected: '' },
+    assert_text: { text: '', locator: { type: 'xpath', value: '' } },
+    assert_element: { locator: { type: 'xpath', value: '' } },
+    assert_visible: { locator: { type: 'xpath', value: '' } },
+    assert_enabled: { locator: { type: 'xpath', value: '' }, enabled: true },
+    wait: { wait_type: 'fixed', duration: 1 },
+    wait_element: { locator: { type: 'xpath', value: '' }, timeout: 10 },
+    wait_text: { text: '', timeout: 10 },
+    scroll: { scroll_type: 'bottom', x: 0, y: 0, locator: { type: 'xpath', value: '' } },
+    screenshot: { filename: '', full_page: false },
+    switch: { switch_type: 'window', name_or_index: '' },
+    refresh: {},
+    back: {},
+    forward: {},
+    press_key: { key: '' },
+    press_keys: { keys: '' },
+    get_cookie: { name: '' },
+    set_cookie: { name: '', value: '', domain: '', path: '' },
+    get_storage: { type: 'localStorage', key: '' },
+    set_storage: { type: 'localStorage', key: '', value: '' },
+    extract: { name: '', source: 'text', locator: { type: 'xpath', value: '' }, attribute: '' },
+    execute_script: { script: '' },
+    execute_async_script: { script: '' },
+    iframe: { locator: { type: 'xpath', value: '' } },
+    alert: { action: 'accept', text: '' },
+    new_tab: { url: '' },
+    close_tab: {},
+
+    // API测试步骤
+    http_request: { method: 'GET', url: '', headers: {}, body: '', timeout: 30 },
+    graphql_request: { url: '', query: '', variables: {}, headers: {}, timeout: 30 },
+    assert_status: { operator: 'equals', expected: 200 },
+    assert_header: { header: '', operator: 'contains', expected: '' },
+    assert_body: { operator: 'contains', expected: '' },
+    assert_json_path: { path: '', operator: 'equals', expected: '' },
+    assert_response_time: { operator: 'less_than', expected: 1000 },
+    extract_json_path: { path: '', variable_name: '' },
+    extract_header: { header: '', variable_name: '' },
+    extract_cookie: { name: '', variable_name: '' },
+    set_header: { headers: {} },
+    set_auth: { type: 'none', username: '', password: '', token: '' },
+    set_body: { body_type: 'raw', content: '' },
+
+    // 移动端测试步骤
+    install_app: { app_path: '', package: '' },
+    launch_app: { package: '', activity: '' },
+    close_app: {},
+    reset_app: {},
+    background_app: { duration: 0 },
+    tap: { locator: { type: 'id', value: '' } },
+    tap_coordinates: { x: 0, y: 0 },
+    long_press: { locator: { type: 'id', value: '' }, duration: 1000 },
+    swipe: { start_x: 0, start_y: 0, end_x: 0, end_y: 0, duration: 500 },
+    scroll_mobile: { direction: 'down', distance: 500 },
+    pinch: { direction: 'in', percent: 50, duration: 500 },
+    drag: { start_element: { type: 'id', value: '' }, end_element: { type: 'id', value: '' }, duration: 500 },
+    rotate: { orientation: 'landscape' },
+    lock: { action: 'lock' },
+    press_back: {},
+    press_home: {},
+    get_device_info: {}
+  }
+  return defaults[type] || {}
+}
+
+function selectStep(step: TestStep) {
+  selectedStepId.value = step.id
+  selectedStep.value = step
+}
+
+function clearSelection() {
+  selectedStepId.value = null
+  selectedStep.value = null
+}
+
+function removeStep(index: number) {
+  const removed = steps.value[index]
+  steps.value = steps.value.filter((_, i) => i !== index)
+  if (removed.id === selectedStepId.value) {
+    clearSelection()
+  }
+}
+
+function handleSave() {
+  emit('save')
+}
+
+function handleRun() {
+  emit('run')
+}
+
+function handleClear() {
+  if (steps.value.length > 0) {
+    steps.value = []
+    clearSelection()
+    message.success('已清空所有步骤')
+  }
+}
+
+function getStepIcon(type: string) {
+  const icons: Record<string, any> = {
+    // Web自动化
+    goto: GlobalOutlined,
+    click: ClickOutlined,
+    double_click: MouseOutlined,
+    right_click: InteractionOutlined,
+    hover: AimOutlined,
+    input: InputOutlined,
+    clear: ClearOutlined,
+    upload: UploadOutlined,
+    select: SelectOutlined,
+    checkbox: CheckSquareOutlined,
+    radio: RadioOutlined,
+    assert: CheckCircleOutlined,
+    assert_title: FileTextOutlined,
+    assert_url: LinkOutlined,
+    assert_text: SearchOutlined,
+    assert_element: EyeOutlined,
+    assert_visible: EyeFilled,
+    assert_enabled: UnlockOutlined,
+    wait: ClockCircleOutlined,
+    wait_element: HourglassOutlined,
+    wait_text: FontSizeOutlined,
+    scroll: VerticalAlignBottomOutlined,
+    screenshot: CameraOutlined,
+    switch: ApartmentOutlined,
+    refresh: ReloadOutlined,
+    back: RollbackOutlined,
+    forward: ForwardOutlined,
+    press_key: KeyboardOutlined,
+    press_keys: ApiOutlined,
+    get_cookie: CookieOutlined,
+    set_cookie: SaveOutlined,
+    get_storage: DatabaseOutlined,
+    set_storage: DatabaseOutlined,
+    extract: ExportOutlined,
+    execute_script: CodeOutlined,
+    execute_async_script: CodeSandboxOutlined,
+    iframe: ApartmentOutlined,
+    alert: AlertOutlined,
+    new_tab: PlusSquareOutlined,
+    close_tab: CloseSquareOutlined,
+    module: AppstoreOutlined,
+
+    // API测试
+    http_request: RequestOutlined,
+    graphql_request: ApiOutlined,
+    assert_status: CheckCircleOutlined,
+    assert_header: FileTextOutlined,
+    assert_body: ResponseOutlined,
+    assert_json_path: JsonPathOutlined,
+    assert_response_time: ClockCircleOutlined,
+    extract_json_path: JsonPathOutlined,
+    extract_header: ExportOutlined,
+    extract_cookie: CookieOutlined,
+    set_header: FileTextOutlined,
+    set_auth: AuthOutlined,
+    set_body: CodeOutlined,
+
+    // 移动端测试
+    install_app: InstallOutlined,
+    launch_app: AppAddOutlined,
+    close_app: CloseSquareOutlined,
+    reset_app: ReloadOutlined,
+    background_app: AppstoreOutlined,
+    tap: TouchOutlined,
+    tap_coordinates: AimOutlined,
+    long_press: GestureOutlined,
+    swipe: SwipeOutlined,
+    scroll_mobile: ScrollMobileOutlined,
+    pinch: ZoomInOutlined,
+    drag: ApartmentOutlined,
+    rotate: RotateLeftOutlined,
+    lock: LockOutlined,
+    press_back: RollbackOutlined,
+    press_home: HomeOutlined,
+    get_device_info: AppstoreOutlined
+  }
+  return icons[type] || CodeOutlined
+}
+
+function getStepLabel(type: string): string {
+  const labels: Record<string, string> = {
+    // Web自动化
+    goto: '打开页面',
+    click: '点击',
+    double_click: '双击',
+    right_click: '右键',
+    hover: '悬停',
+    input: '输入',
+    clear: '清空',
+    upload: '上传',
+    select: '下拉选择',
+    checkbox: '复选框',
+    radio: '单选框',
+    assert: '断言',
+    assert_title: '验证标题',
+    assert_url: '验证URL',
+    assert_text: '验证文本',
+    assert_element: '验证元素',
+    assert_visible: '验证可见',
+    assert_enabled: '验证可用',
+    wait: '等待',
+    wait_element: '等待元素',
+    wait_text: '等待文本',
+    scroll: '滚动',
+    screenshot: '截图',
+    switch: '切换',
+    refresh: '刷新',
+    back: '后退',
+    forward: '前进',
+    press_key: '按键',
+    press_keys: '组合键',
+    get_cookie: '获取Cookie',
+    set_cookie: '设置Cookie',
+    get_storage: '获取存储',
+    set_storage: '设置存储',
+    extract: '提取数据',
+    execute_script: '执行脚本',
+    execute_async_script: '异步脚本',
+    iframe: '切换iframe',
+    alert: '处理弹窗',
+    new_tab: '新标签',
+    close_tab: '关闭标签',
+    module: '模块',
+
+    // API测试
+    http_request: 'HTTP请求',
+    graphql_request: 'GraphQL请求',
+    assert_status: '验证状态码',
+    assert_header: '验证响应头',
+    assert_body: '验证响应体',
+    assert_json_path: '验证JSON路径',
+    assert_response_time: '验证响应时间',
+    extract_json_path: '提取JSON路径',
+    extract_header: '提取响应头',
+    extract_cookie: '提取Cookie',
+    set_header: '设置请求头',
+    set_auth: '设置认证',
+    set_body: '设置请求体',
+
+    // 移动端测试
+    install_app: '安装应用',
+    launch_app: '启动应用',
+    close_app: '关闭应用',
+    reset_app: '重置应用',
+    background_app: '后台运行',
+    tap: '点击',
+    tap_coordinates: '点击坐标',
+    long_press: '长按',
+    swipe: '滑动',
+    scroll_mobile: '滚动',
+    pinch: '双指缩放',
+    drag: '拖拽',
+    rotate: '旋转屏幕',
+    lock: '锁屏/解锁',
+    press_back: '返回键',
+    press_home: 'Home键',
+    get_device_info: '获取设备信息'
+  }
+  return labels[type] || type
+}
+</script>
+
+<style scoped>
+.script-editor {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: white;
+  border-radius: 8px;
+}
+
+.editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.editor-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.step-palette {
+  width: 220px;
+  border-right: 1px solid #f0f0f0;
+  overflow-y: auto;
+}
+
+.palette-header {
+  padding: 12px 16px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.palette-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.palette-body {
+  padding: 12px;
+}
+
+.step-category {
+  margin-bottom: 16px;
+}
+
+.category-title {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 8px;
+  padding-left: 4px;
+}
+
+.category-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.step-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  cursor: grab;
+  transition: all 0.2s;
+}
+
+.step-item:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.step-item span {
+  margin-left: 8px;
+  font-size: 13px;
+}
+
+.module-item {
+  border-style: dashed;
+}
+
+.step-canvas {
+  flex: 1;
+  background: #fafafa;
+  overflow-y: auto;
+}
+
+.canvas-content {
+  padding: 16px;
+  min-height: 100%;
+}
+
+.step-card {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: white;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.step-card:hover {
+  border-color: #1890ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.step-card.selected {
+  border-color: #1890ff;
+  background: #e6f7ff;
+}
+
+.step-handle {
+  margin-right: 8px;
+  color: #999;
+  cursor: grab;
+}
+
+.step-icon {
+  margin-right: 12px;
+  color: #1890ff;
+}
+
+.step-info {
+  flex: 1;
+}
+
+.step-name {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.step-type {
+  font-size: 12px;
+  color: #999;
+}
+
+.property-panel {
+  width: 320px;
+  border-left: 1px solid #f0f0f0;
+  overflow-y: auto;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.panel-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.panel-body {
+  padding: 16px;
+}
+</style>

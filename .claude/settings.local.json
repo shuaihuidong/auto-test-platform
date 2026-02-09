@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python manage.py makemigrations:*)",
+      "Bash(pip install:*)",
+      "Bash(python manage.py migrate:*)",
+      "Bash(python manage.py shell:*)",
+      "Bash(python manage.py runserver:*)",
+      "Bash(npm run dev:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(exit:*)",
+      "Bash(python:*)",
+      "Bash(curl:*)",
+      "Bash(powershell:*)",
+      "Bash(npx vue-tsc:*)",
+      "Bash(npx vite build:*)"
+    ]
+  }
+}

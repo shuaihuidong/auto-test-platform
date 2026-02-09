@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  # RabbitMQ 消息队列
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: auto-test-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP 端口
+      - "15672:15672" # 管理界面端口
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  rabbitmq_data:
+    driver: local
