@@ -146,14 +146,16 @@ class MainWindow(QMainWindow):
         self.task_table.setColumnCount(4)
         self.task_table.setHorizontalHeaderLabels(["任务ID", "脚本名称", "状态", "开始时间"])
         self.task_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.task_table.verticalHeader().setVisible(False)  # 隐藏行号列
         self.task_table.setRowCount(0)
         task_tab_widget.addTab(self.task_table, "当前任务")
 
         # 计划执行标签页
         self.plan_table = QTableWidget()
         self.plan_table.setColumnCount(5)
-        self.plan_table.setHorizontalHeaderLabels(["计划名称", "脚本名称", "执行模式", "状态", "序号"])
+        self.plan_table.setHorizontalHeaderLabels(["序号", "脚本名称", "计划名称", "执行模式", "状态"])
         self.plan_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.plan_table.verticalHeader().setVisible(False)  # 隐藏行号列
         self.plan_table.setRowCount(0)
         task_tab_widget.addTab(self.plan_table, "计划执行")
 
@@ -376,9 +378,17 @@ class MainWindow(QMainWindow):
         self.task_table.setRowCount(len(self.current_tasks))
 
         for row, (task_id, task_info) in enumerate(self.current_tasks.items()):
-            self.task_table.setItem(row, 0, QTableWidgetItem(str(task_id)))
-            self.task_table.setItem(row, 1, QTableWidgetItem(task_info["name"]))
+            # 任务ID
+            item_id = QTableWidgetItem(str(task_id))
+            item_id.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.task_table.setItem(row, 0, item_id)
 
+            # 脚本名称
+            item_name = QTableWidgetItem(task_info["name"])
+            item_name.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.task_table.setItem(row, 1, item_name)
+
+            # 状态
             status_item = QTableWidgetItem()
             if task_info["status"] == "running":
                 status_item.setText("执行中")
@@ -391,37 +401,55 @@ class MainWindow(QMainWindow):
                 status_item.setBackground(QColor("#fff2f0"))
             elif task_info["status"] == "cancelled":
                 status_item.setText("已取消")
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.task_table.setItem(row, 2, status_item)
 
-            self.task_table.setItem(row, 3, QTableWidgetItem(task_info["start_time"]))
+            # 开始时间
+            item_time = QTableWidgetItem(task_info["start_time"])
+            item_time.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.task_table.setItem(row, 3, item_time)
 
     def update_plan_table(self):
         """更新计划执行表格"""
-        total_rows = sum(len(plan["scripts"]) for plan in self.current_plans.values())
+        # 【修复】直接从 task_manager.plan_executions 读取，而不是从 current_plans
+        # 这样可以确保状态实时同步
+        plan_executions = self.task_manager.plan_executions
+        total_rows = sum(len(plan["scripts"]) for plan in plan_executions.values())
         self.plan_table.setRowCount(total_rows)
 
         # 调试日志
-        print(f"[GUI DEBUG] update_plan_table: plan数={len(self.current_plans)}, 行数={total_rows}")
-        self.log_window.append_log(f"[DEBUG] 更新计划表格: plan数={len(self.current_plans)}, 行数={total_rows}", "DEBUG")
+        print(f"[GUI DEBUG] update_plan_table: plan数={len(plan_executions)}, 行数={total_rows}")
+        self.log_window.append_log(f"[DEBUG] 更新计划表格: plan数={len(plan_executions)}, 行数={total_rows}", "DEBUG")
         from loguru import logger
-        logger.info(f"[GUI] 更新计划表格: plan数={len(self.current_plans)}, 行数={total_rows}")
+        logger.info(f"[GUI] 更新计划表格: plan数={len(plan_executions)}, 行数={total_rows}")
 
         row = 0
-        for plan_id, plan_info in self.current_plans.items():
+        for plan_id, plan_info in plan_executions.items():
             print(f"[GUI DEBUG] 处理计划 {plan_id}: {plan_info['plan_name']}")
             logger.info(f"[GUI] 处理计划 {plan_id}: {plan_info['plan_name']}, 脚本数={len(plan_info['scripts'])}")
             self.log_window.append_log(f"[DEBUG] 处理计划 {plan_id}: {plan_info['plan_name']}", "DEBUG")
             for script in plan_info["scripts"]:
                 print(f"[GUI DEBUG]   脚本: {script['name']}, 状态: {script['status']}")
-                # 计划名称
-                self.plan_table.setItem(row, 0, QTableWidgetItem(plan_info["plan_name"]))
+                # 序号（第一列）
+                item_index = QTableWidgetItem(f"{script['index'] + 1}")
+                item_index.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.plan_table.setItem(row, 0, item_index)
 
                 # 脚本名称
-                self.plan_table.setItem(row, 1, QTableWidgetItem(script["name"]))
+                item_name = QTableWidgetItem(script["name"])
+                item_name.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.plan_table.setItem(row, 1, item_name)
+
+                # 计划名称
+                item_plan = QTableWidgetItem(plan_info["plan_name"])
+                item_plan.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.plan_table.setItem(row, 2, item_plan)
 
                 # 执行模式
                 mode_text = "顺序执行" if plan_info["execution_mode"] == "sequential" else "并行执行"
-                self.plan_table.setItem(row, 2, QTableWidgetItem(mode_text))
+                item_mode = QTableWidgetItem(mode_text)
+                item_mode.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.plan_table.setItem(row, 3, item_mode)
 
                 # 状态
                 status_item = QTableWidgetItem()
@@ -438,10 +466,8 @@ class MainWindow(QMainWindow):
                 elif status == "failed":
                     status_item.setText("失败")
                     status_item.setBackground(QColor("#fff2f0"))
-                self.plan_table.setItem(row, 3, status_item)
-
-                # 序号
-                self.plan_table.setItem(row, 4, QTableWidgetItem(f"{script['index'] + 1}"))
+                status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.plan_table.setItem(row, 4, status_item)
 
                 row += 1
 

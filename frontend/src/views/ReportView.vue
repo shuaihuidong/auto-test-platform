@@ -61,36 +61,52 @@
             </a-card>
           </a-col>
           <a-col :span="12">
-            <a-card title="问题分析与建议" :body-style="{ height: '350px', padding: '20px' }">
+            <a-card title="问题分析与建议" :body-style="{ height: '350px', padding: '16px' }">
               <!-- 失败原因分析 -->
-              <div class="failure-analysis">
-                <div class="analysis-title">
-                  <ExperimentOutlined style="margin-right: 6px; color: #1890ff;" />
-                  失败原因分析
-                </div>
-                <div v-if="getFailureReasons().length > 0" class="failure-reasons">
-                  <div v-for="(reason, index) in getFailureReasons()" :key="index" class="failure-reason-item">
+              <div class="failure-analysis" v-if="getFailureReasons().length > 0">
+                <div v-for="(reason, index) in getFailureReasons()" :key="index" class="failure-reason-group">
+                  <!-- 失败原因标题 -->
+                  <div class="failure-reason-header">
+                    <ExperimentOutlined style="margin-right: 6px; color: #1890ff;" />
                     <span class="reason-name">{{ reason.name }}</span>
                     <span class="reason-count">{{ reason.count }} 次</span>
                   </div>
-                </div>
-                <div v-else class="no-failure">
-                  <div class="no-failure-content">
-                    <CheckCircleOutlined style="font-size: 48px; color: #52c41a; margin-bottom: 8px;" />
-                    <div class="no-failure-text">暂无失败</div>
-                    <div class="no-failure-sub">所有脚本均通过</div>
+
+                  <!-- 错误示例 -->
+                  <div v-if="reason.examples && reason.examples.length > 0" class="error-examples">
+                    <div v-for="(example, idx) in reason.examples" :key="idx" class="error-example">
+                      {{ example }}{{ example.length >= 80 ? '...' : '' }}
+                    </div>
+                  </div>
+
+                  <!-- 失败的脚本列表（前3个） -->
+                  <div v-if="reason.scripts && reason.scripts.length > 0" class="failed-scripts">
+                    <div v-for="(script, idx) in reason.scripts.slice(0, 3)" :key="script.id" class="failed-script-item">
+                      <span class="script-name">{{ script.name }}</span>
+                    </div>
+                    <div v-if="reason.scripts.length > 3" class="more-scripts">
+                      还有 {{ reason.scripts.length - 3 }} 个脚本...
+                    </div>
+                  </div>
+
+                  <!-- 改进建议 -->
+                  <div v-if="reason.suggestions && reason.suggestions.length > 0" class="reason-suggestions">
+                    <div class="suggestion-icon">💡</div>
+                    <div class="suggestion-list">
+                      <div v-for="(suggestion, idx) in reason.suggestions.slice(0, 2)" :key="idx" class="suggestion-text">
+                        {{ suggestion }}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <!-- 改进建议 -->
-              <div v-if="getSuggestions().length > 0" class="suggestions">
-                <div class="suggestions-title">
-                  <BulbOutlined style="color: #faad14; margin-right: 6px;" />
-                  改进建议
-                </div>
-                <div v-for="(suggestion, index) in getSuggestions()" :key="index" class="suggestion-item">
-                  {{ suggestion }}
+              <!-- 无失败 -->
+              <div v-else class="no-failure">
+                <div class="no-failure-content">
+                  <CheckCircleOutlined style="font-size: 48px; color: #52c41a; margin-bottom: 8px;" />
+                  <div class="no-failure-text">测试全部通过</div>
+                  <div class="no-failure-sub">所有脚本均执行成功</div>
                 </div>
               </div>
             </a-card>
@@ -547,32 +563,126 @@ function getStatusText(status: string) {
   return texts[status] || status
 }
 
-// 获取失败原因分析
+// 获取失败原因分析（增强版）
 function getFailureReasons() {
   if (!report.value || !report.value.charts_data?.scripts) return []
 
-  // 统计失败原因（从脚本维度）
-  const reasonMap = new Map<string, number>()
-  const failedScripts = report.value.charts_data.scripts.filter((s: any) => s.status === 'failed' && s.error_reason)
+  // 统计失败原因（从脚本维度），同时记录失败的脚本
+  const reasonMap = new Map<string, { count: number; scripts: any[]; examples: string[] }>()
+  const failedScripts = report.value.charts_data.scripts.filter((s: any) => s.status === 'failed')
 
   failedScripts.forEach((script: any) => {
-    const reason = classifyFailureReason(script.error_reason)
-    reasonMap.set(reason, (reasonMap.get(reason) || 0) + 1)
+    const errorMsg = script.error_reason || script.error_message || '未知错误'
+    const reason = classifyFailureReason(errorMsg)
+
+    if (!reasonMap.has(reason)) {
+      reasonMap.set(reason, {
+        count: 0,
+        scripts: [],
+        examples: []
+      })
+    }
+
+    const info = reasonMap.get(reason)!
+    info.count++
+    info.scripts.push({
+      id: script.id,
+      name: script.name,
+      error: errorMsg.substring(0, 100) // 保存前100个字符作为示例
+    })
+
+    // 提取核心错误信息（去掉"步骤 X [名称]:"前缀）
+    let coreError = errorMsg
+    if (errorMsg.includes(']:')) {
+      // 从 "步骤 7 [点击]: 未找到元素" 中提取 "未找到元素"
+      coreError = errorMsg.split(']:')[1]?.trim() || errorMsg
+    }
+    // 保存最多2个不同的核心错误示例
+    if (info.examples.length < 2 && !info.examples.includes(coreError.substring(0, 60))) {
+      info.examples.push(coreError.substring(0, 60))
+    }
   })
 
   // 如果没有失败原因但有失败的脚本，返回通用原因
-  if (reasonMap.size === 0) {
-    const failedCount = report.value.charts_data.scripts.filter((s: any) => s.status === 'failed').length
-    if (failedCount > 0) {
-      return [{ name: '脚本执行失败', count: failedCount }]
-    }
+  if (reasonMap.size === 0 && failedScripts.length > 0) {
+    return [{
+      name: '脚本执行失败',
+      count: failedScripts.length,
+      scripts: failedScripts.map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        error: (s.error_reason || s.error_message || '未知错误').substring(0, 100)
+      })),
+      examples: ['脚本执行过程中发生错误，请查看详细日志'],
+      suggestions: ['检查测试环境配置和脚本逻辑', '查看详细日志定位具体问题']
+    }]
   }
 
-  // 转换为数组并排序
+  // 转换为数组并排序，添加建议
   return Array.from(reasonMap.entries())
-    .map(([name, count]) => ({ name, count }))
+    .map(([name, info]) => ({
+      name,
+      count: info.count,
+      scripts: info.scripts,
+      examples: info.examples,
+      suggestions: getSuggestionsForReason(name)
+    }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 3) // 只显示前3个
+}
+
+// 根据失败原因获取针对性建议
+function getSuggestionsForReason(reasonName: string): string[] {
+  const suggestionMap: Record<string, string[]> = {
+    '执行超时': [
+      '检查网络连接和页面加载速度',
+      '增加脚本执行超时时间',
+      '使用显式等待替代固定等待时间'
+    ],
+    '元素定位失败': [
+      '检查元素选择器是否正确',
+      '确认元素是否在iframe中，需要先切换',
+      '确保页面完全加载后再操作元素',
+      '尝试使用更稳定的定位方式（如CSS选择器）'
+    ],
+    '网络连接问题': [
+      '检查网络连接和服务器状态',
+      '增加重试机制处理网络波动',
+      '检查防火墙和代理设置'
+    ],
+    '断言验证失败': [
+      '检查断言条件和测试数据是否匹配',
+      '验证页面结构是否发生变化',
+      '确认测试数据的正确性'
+    ],
+    '浏览器相关问题': [
+      '检查浏览器驱动版本是否匹配',
+      '尝试使用不同的浏览器或浏览器版本',
+      '确认浏览器是否正常启动'
+    ],
+    'JavaScript错误': [
+      '检查页面控制台是否有JS错误',
+      '验证页面脚本是否正常加载',
+      '联系开发人员修复页面JS问题'
+    ],
+    '权限问题': [
+      '检查用户权限和访问控制配置',
+      '确保测试账号有足够的操作权限',
+      '验证登录状态是否正常'
+    ],
+    '数据异常': [
+      '检查测试数据是否正确配置',
+      '验证数据源是否可用',
+      '确认变量引用是否正确'
+    ],
+    '其他错误': [
+      '检查测试环境配置和脚本逻辑',
+      '查看详细日志定位具体问题',
+      '联系技术支持获取帮助'
+    ]
+  }
+
+  return suggestionMap[reasonName] || ['检查测试环境配置', '查看详细日志定位问题']
 }
 
 // 分类失败原因（脚本级别）
@@ -636,61 +746,6 @@ function classifyFailureReason(errorMsg: string): string {
   }
 
   return '其他错误'
-}
-
-// 获取改进建议
-function getSuggestions() {
-  const failureReasons = getFailureReasons()
-  const suggestions: string[] = []
-
-  failureReasons.forEach(reason => {
-    switch (reason.name) {
-      case '执行超时':
-        suggestions.push('增加脚本执行超时时间，或检查页面加载速度')
-        suggestions.push('优化等待策略，使用显式等待而非固定等待')
-        break
-      case '元素定位失败':
-        suggestions.push('检查元素选择器是否正确，元素是否在iframe中')
-        suggestions.push('确保页面完全加载后再进行元素操作')
-        break
-      case '网络连接问题':
-        suggestions.push('检查网络连接和服务器状态')
-        suggestions.push('增加重试机制处理网络波动')
-        break
-      case '断言验证失败':
-        suggestions.push('检查断言条件和测试数据是否匹配')
-        suggestions.push('验证页面结构是否发生变化')
-        break
-      case '浏览器相关问题':
-        suggestions.push('检查浏览器驱动版本是否匹配')
-        suggestions.push('尝试使用不同的浏览器或浏览器版本')
-        break
-      case 'JavaScript错误':
-        suggestions.push('检查页面控制台是否有JS错误')
-        suggestions.push('验证页面脚本是否正常加载')
-        break
-      case '权限问题':
-        suggestions.push('检查用户权限和访问控制配置')
-        suggestions.push('确保测试账号有足够的操作权限')
-        break
-      case '数据异常':
-        suggestions.push('检查测试数据是否正确配置')
-        suggestions.push('验证数据源是否可用')
-        break
-      default:
-        suggestions.push('检查测试环境配置和脚本逻辑')
-        suggestions.push('查看详细日志定位具体问题')
-    }
-  })
-
-  // 如果没有失败原因，提供通用的建议
-  if (suggestions.length === 0) {
-    suggestions.push('定期维护测试用例，保持测试数据更新')
-    suggestions.push('监控测试执行环境，确保资源充足')
-  }
-
-  // 去重并限制数量
-  return Array.from(new Set(suggestions)).slice(0, 3)
 }
 
 // 获取步骤失败原因分析
@@ -890,49 +945,115 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;  /* 添加滚动支持 */
+  padding-right: 4px;  /* 滚动条间距 */
 }
 
-.analysis-title {
+.failure-reason-group {
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  margin-bottom: 10px;
+}
+
+.failure-reason-group:last-child {
+  margin-bottom: 0;
+}
+
+.failure-reason-header {
+  display: flex;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  margin-bottom: 8px;
+}
+
+.failure-reason-header .reason-name {
+  flex: 1;
   font-size: 14px;
   font-weight: 500;
   color: rgba(0, 0, 0, 0.85);
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
 }
 
-.failure-reasons {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.failure-reason-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 14px;
-  background: rgba(245, 34, 45, 0.06);
-  border-radius: 6px;
-  border-left: 3px solid #f5222d;
-  transition: all 0.2s;
-}
-
-.failure-reason-item:hover {
-  background: rgba(245, 34, 45, 0.1);
-  transform: translateX(2px);
-}
-
-.reason-name {
-  font-size: 14px;
-  color: rgba(0, 0, 0, 0.75);
-  font-weight: 400;
-}
-
-.reason-count {
-  font-size: 15px;
-  font-weight: 500;
+.failure-reason-header .reason-count {
+  font-size: 13px;
+  font-weight: 600;
   color: #f5222d;
+  background: rgba(245, 34, 45, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.error-examples {
+  margin-bottom: 8px;
+}
+
+.error-example {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.55);
+  background: rgba(245, 34, 45, 0.05);
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  line-height: 1.4;
+}
+
+.error-example:last-child {
+  margin-bottom: 0;
+}
+
+.failed-scripts {
+  margin-bottom: 8px;
+}
+
+.failed-script-item {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+  padding: 4px 0 4px 16px;
+  position: relative;
+}
+
+.failed-script-item::before {
+  content: '•';
+  position: absolute;
+  left: 4px;
+  color: rgba(0, 0, 0, 0.3);
+}
+
+.script-name {
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.more-scripts {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.4);
+  padding-left: 16px;
+  font-style: italic;
+}
+
+.reason-suggestions {
+  display: flex;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.06);
+}
+
+.suggestion-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.suggestion-list {
+  flex: 1;
+}
+
+.suggestion-text {
+  font-size: 12px;
+  color: rgba(250, 173, 20, 0.85);
+  line-height: 1.5;
+  padding: 3px 0;
 }
 
 .no-failure {
@@ -956,32 +1077,6 @@ onMounted(() => {
 .no-failure-sub {
   font-size: 13px;
   color: rgba(0, 0, 0, 0.45);
-}
-
-.suggestions {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.suggestions-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: rgba(0, 0, 0, 0.85);
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-}
-
-.suggestion-item {
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.65);
-  padding: 10px 14px;
-  background: rgba(250, 173, 20, 0.08);
-  border-radius: 6px;
-  margin-bottom: 8px;
-  line-height: 1.6;
-  border-left: 3px solid #faad14;
 }
 
 .suggestion-item:last-child {

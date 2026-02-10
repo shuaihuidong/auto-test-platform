@@ -586,14 +586,6 @@ class ScriptExecutor:
             service = Service(ChromeDriverManager().install())
             return webdriver.Chrome(service=service, options=options)
 
-        if service:
-            return webdriver.Chrome(service=service, options=options)
-        else:
-            # 使用 webdriver-manager 自动管理驱动
-            from webdriver_manager.chrome import ChromeDriverManager
-            service = Service(ChromeDriverManager().install())
-            return webdriver.Chrome(service=service, options=options)
-
     def _create_firefox_driver(self) -> webdriver.Firefox:
         """创建 Firefox WebDriver"""
         options = webdriver.FirefoxOptions()

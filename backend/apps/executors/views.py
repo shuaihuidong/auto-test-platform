@@ -363,6 +363,22 @@ class TaskQueueViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # 检查执行记录状态，如果已停止则不允许开始
+        if task.execution and task.execution.status == 'stopped':
+            return Response(
+                {'error': '任务已被停止，无法开始执行'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 检查父任务状态（如果存在），如果父任务已停止则不允许开始
+        if task.execution and task.execution.parent:
+            parent_status = task.execution.parent.status
+            if parent_status == 'stopped':
+                return Response(
+                    {'error': '父任务已被停止，子任务无法开始执行'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
         task.status = 'running'
         task.started_at = timezone.now()
         task.save()
@@ -374,6 +390,20 @@ class TaskQueueViewSet(viewsets.ModelViewSet):
 
         # 更新执行记录状态
         if task.execution:
+            # 再次检查执行记录状态（双重检查）
+            if task.execution.status == 'stopped':
+                # 任务已被停止，回退状态
+                task.status = 'cancelled'
+                task.completed_at = timezone.now()
+                task.save()
+                if task.executor:
+                    task.executor.current_tasks = max(0, task.executor.current_tasks - 1)
+                    task.executor.save()
+                return Response(
+                    {'error': '任务已被停止，无法开始执行'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             task.execution.status = 'running'
             task.execution.started_at = timezone.now()
             task.execution.save()

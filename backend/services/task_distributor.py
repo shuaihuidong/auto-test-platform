@@ -56,6 +56,22 @@ class TaskDistributor:
                 execution_mode = task.script_data.get('execution_mode', 'parallel')
                 parent_execution_id = task.script_data.get('parent_execution_id')
 
+                # 检查父任务状态（如果存在父任务）
+                if parent_execution_id:
+                    try:
+                        parent_execution = Execution.objects.get(id=parent_execution_id)
+                        # 如果父任务已被停止，跳过此任务（不分发）
+                        if parent_execution.status == 'stopped':
+                            logger.info(f"父任务 {parent_execution_id} 已停止，跳过子任务 {task.id} 的分发")
+                            # 将任务状态设为已取消
+                            task.status = 'cancelled'
+                            task.completed_at = timezone.now()
+                            task.save()
+                            continue
+                    except Execution.DoesNotExist:
+                        logger.warning(f"父任务 {parent_execution_id} 不存在，跳过任务 {task.id}")
+                        continue
+
                 # 如果是顺序执行，检查前一个脚本是否已完成
                 if execution_mode == 'sequential' and parent_execution_id:
                     script_index = task.script_data.get('script_index', 0)
@@ -69,31 +85,39 @@ class TaskDistributor:
                             if task.status != 'pending':
                                 continue
 
-                            # 检查前一个脚本的执行状态（通过 parent_id 和 id 排序来确定顺序）
-                            # 由于 script_index 是按创建顺序分配的，可以通过查询 parent_id 相同且 id 小于当前 execution_id 的执行数量来验证
-                            # 更直接的方式：查询所有同父执行的子任务，按 id 排序，检查 script_index-1 的状态
+                            # 【修复】通过查询所有同父执行的任务，按 script_index 排序来检查前一个脚本状态
+                            # 查询所有同父执行的任务，按 script_index 排序
+                            sibling_tasks = TaskQueue.objects.filter(
+                                script_data__parent_execution_id=parent_execution_id
+                            ).order_by('script_data__script_index')
 
-                            # 获取当前 execution 对象
-                            try:
-                                current_execution = Execution.objects.get(id=task.execution_id)
-                            except Execution.DoesNotExist:
-                                logger.warning(f"找不到执行记录 {task.execution_id}，跳过任务 {task.id}")
-                                continue
+                            # 找到 script_index = script_index - 1 的任务
+                            prev_task = None
+                            for sibling_task in sibling_tasks:
+                                sibling_script_index = sibling_task.script_data.get('script_index', 0)
+                                if sibling_script_index == script_index - 1:
+                                    prev_task = sibling_task
+                                    break
 
-                            # 查询同父执行的所有子任务，按 id 排序
-                            sibling_executions = Execution.objects.filter(
-                                parent_id=parent_execution_id
-                            ).order_by('id')
+                            if prev_task:
+                                # 检查前一个脚本对应的执行状态
+                                try:
+                                    prev_execution = Execution.objects.get(id=prev_task.execution_id)
+                                    # 如果前一个脚本未完成，跳过当前任务
+                                    if prev_execution.status not in ['completed', 'failed', 'stopped']:
+                                        logger.info(f"任务 {task.id} (执行ID: {task.execution_id}, 脚本索引: {script_index}) "
+                                                  f"等待前一个脚本 (执行ID: {prev_execution.id}, 状态: {prev_execution.status}) 完成")
+                                        continue  # 跳过此任务，等待下次分发
+                                except Execution.DoesNotExist:
+                                    logger.warning(f"找不到前一个脚本的执行记录 {prev_task.execution_id}，跳过任务 {task.id}")
+                                    continue
 
-                            # 检查前一个脚本是否已完成
-                            if script_index <= len(sibling_executions):
-                                prev_execution = sibling_executions[script_index - 1]
-
-                                # 如果前一个脚本未完成，跳过当前任务
-                                if prev_execution.status not in ['completed', 'failed', 'stopped']:
-                                    logger.info(f"任务 {task.id} (执行ID: {task.execution_id}, 脚本索引: {script_index}) "
-                                              f"等待前一个脚本 (执行ID: {prev_execution.id}, 状态: {prev_execution.status}) 完成")
-                                    continue  # 跳过此任务，等待下次分发
+                # 在查找执行器之前，再次确认任务状态仍是pending
+                # 避免在检查过程中任务被取消或状态改变
+                task = TaskQueue.objects.select_for_update().get(id=task.id)
+                if task.status != 'pending':
+                    logger.info(f"任务 {task.id} 状态已变为 {task.status}，跳过分发")
+                    continue
 
                 executor = self._find_available_executor(task)
                 if executor:
@@ -182,6 +206,37 @@ class TaskDistributor:
             executor: 目标执行机
         """
         with transaction.atomic():
+            # 再次锁定并检查任务状态
+            task = TaskQueue.objects.select_for_update().get(id=task.id)
+
+            # 如果任务状态已改变，不分配
+            if task.status != 'pending':
+                logger.warning(f"任务 {task.id} 状态已变为 {task.status}，不分配给执行机")
+                return
+
+            # 检查父任务状态（如果存在）
+            parent_execution_id = task.script_data.get('parent_execution_id')
+            if parent_execution_id:
+                try:
+                    parent_execution = Execution.objects.get(id=parent_execution_id)
+                    if parent_execution.status == 'stopped':
+                        logger.info(f"父任务 {parent_execution_id} 已停止，不分配子任务 {task.id}")
+                        task.status = 'cancelled'
+                        task.completed_at = timezone.now()
+                        task.save()
+                        return
+                except Execution.DoesNotExist:
+                    logger.warning(f"父任务 {parent_execution_id} 不存在，不分配任务 {task.id}")
+                    return
+
+            # 检查任务本身的执行记录状态
+            if task.execution and task.execution.status == 'stopped':
+                logger.info(f"执行记录 {task.execution_id} 已停止，不分配任务 {task.id}")
+                task.status = 'cancelled'
+                task.completed_at = timezone.now()
+                task.save()
+                return
+
             # 更新任务状态
             task.executor = executor
             task.status = 'assigned'
@@ -334,11 +389,91 @@ class TaskDistributor:
         Returns:
             取消的任务数
         """
-        count = TaskQueue.objects.filter(
+        count = 0
+
+        # 首先取消直接关联到此execution_id的待分配任务
+        count += TaskQueue.objects.filter(
             execution_id=execution_id,
             status='pending'
         ).update(
-            status='cancelled'
+            status='cancelled',
+            completed_at=timezone.now()
         )
+
+        # 如果是计划执行（父任务），还需要取消所有子任务的待分配任务
+        try:
+            execution = Execution.objects.get(id=execution_id)
+            if execution.execution_type == 'plan':
+                # 查找所有子执行
+                child_executions = execution.children.all()
+                child_ids = [child.id for child in child_executions]
+
+                # 取消所有子任务的待分配任务
+                child_count = TaskQueue.objects.filter(
+                    execution_id__in=child_ids,
+                    status='pending'
+                ).update(
+                    status='cancelled',
+                    completed_at=timezone.now()
+                )
+                count += child_count
+                logger.info(f"已取消计划执行 {execution_id} 的 {child_count} 个子任务的待分配任务")
+
+        except Execution.DoesNotExist:
+            logger.warning(f"执行记录 {execution_id} 不存在")
+
         logger.info(f"已取消执行 {execution_id} 的 {count} 个待分配任务")
+        return count
+
+    def cancel_all_child_tasks(self, execution_id: int) -> int:
+        """
+        取消某个父执行的所有子任务（包括 pending、assigned、running 状态）
+        用于停止计划执行时彻底取消所有子任务
+
+        Args:
+            execution_id: 父执行ID
+
+        Returns:
+            取消的任务数
+        """
+        count = 0
+
+        try:
+            execution = Execution.objects.get(id=execution_id)
+
+            if execution.execution_type == 'plan':
+                # 查找所有子执行
+                child_executions = execution.children.all()
+                child_ids = [child.id for child in child_executions]
+
+                # 取消所有子任务的所有状态（pending、assigned、running）
+                # 注意：不取消 completed、failed、cancelled 状态的任务
+                child_count = TaskQueue.objects.filter(
+                    execution_id__in=child_ids,
+                    status__in=['pending', 'assigned', 'running']
+                ).update(
+                    status='cancelled',
+                    completed_at=timezone.now()
+                )
+                count += child_count
+
+                # 同时减少执行机的当前任务数（对于 assigned 和 running 状态的任务）
+                affected_tasks = TaskQueue.objects.filter(
+                    execution_id__in=child_ids,
+                    status='cancelled'
+                )
+
+                for task in affected_tasks:
+                    if task.executor:
+                        # 减少执行机的当前任务数
+                        executor = task.executor
+                        executor.current_tasks = max(0, executor.current_tasks - 1)
+                        executor.save()
+
+                logger.info(f"已取消计划执行 {execution_id} 的 {count} 个子任务（包括 running 状态）")
+
+        except Execution.DoesNotExist:
+            logger.warning(f"执行记录 {execution_id} 不存在")
+
+        logger.info(f"总共取消了 {count} 个子任务")
         return count

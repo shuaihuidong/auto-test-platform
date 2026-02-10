@@ -56,6 +56,13 @@ class MessageQueueConsumer:
         # RabbitMQ 配置
         self._mq_config = self._get_mq_config()
 
+        # 【关键修复】缓存已停止的父执行ID，避免重复查询和意外执行旧任务
+        # 使用列表存储（保留顺序，方便清理旧条目）
+        self._stopped_parent_executions: list = []
+        self._stopped_cache_lock = threading.Lock()
+        # 缓存大小限制，避免无限增长（保留最近100个已停止的执行）
+        self._stopped_cache_max_size = 100
+
     def _get_mq_config(self) -> Dict[str, Any]:
         """获取 RabbitMQ 配置"""
         return {
@@ -155,8 +162,17 @@ class MessageQueueConsumer:
             # 解析消息
             message = json.loads(body.decode('utf-8'))
             task_id = message.get('task_id', '')
-            print(f"[DEBUG] MQ received task: {task_id}")
             logger.info(f"收到任务: {task_id}")
+
+            # 【关键修复】在处理消息之前，先检查任务是否已被停止
+            # 如果任务已被停止，直接 NACK 不重新入队，不调用 on_task_received
+            if self._is_task_stopped(message):
+                logger.warning(f"任务 {task_id} 已被停止，直接 NACK 不重新入队")
+                channel.basic_nack(
+                    delivery_tag=method.delivery_tag,
+                    requeue=False  # 不重新入队
+                )
+                return
 
             # 调用任务处理回调
             if self.on_task_received:
@@ -169,21 +185,30 @@ class MessageQueueConsumer:
                         channel.basic_ack(delivery_tag=method.delivery_tag)
                         logger.info(f"任务 {task_id} 完成，已 ACK")
                     else:
-                        # 任务被拒绝，NACK 并重新入队
-                        # 注意：执行机端已移除并发限制检查，正常情况下不会走到这里
+                        # 任务被拒绝，需要判断是否重新入队
+                        # 检查任务是否已被停止，如果停止则不重新入队
+                        should_requeue = self._should_requeue_task(message)
+
                         channel.basic_nack(
                             delivery_tag=method.delivery_tag,
-                            requeue=True  # 重新入队，避免任务丢失
+                            requeue=should_requeue  # 根据任务状态决定是否重新入队
                         )
-                        logger.warning(f"任务 {task_id} 被拒绝，已 NACK 重新入队")
+
+                        if should_requeue:
+                            logger.warning(f"任务 {task_id} 被拒绝（并发限制），已 NACK 重新入队")
+                        else:
+                            logger.warning(f"任务 {task_id} 已被停止，已 NACK 不再重新入队")
 
                 except Exception as e:
                     logger.error(f"处理任务时出错: {e}", exc_info=True)
                     # 发生异常，NACK 并重新入队
-                    channel.basic_nack(
-                        delivery_tag=method.delivery_tag,
-                        requeue=True
-                    )
+                    try:
+                        channel.basic_nack(
+                            delivery_tag=method.delivery_tag,
+                            requeue=True
+                        )
+                    except:
+                        pass
             else:
                 # 没有回调函数，直接 ACK
                 channel.basic_ack(delivery_tag=method.delivery_tag)
@@ -204,6 +229,150 @@ class MessageQueueConsumer:
                 )
             except:
                 pass
+
+    def _is_task_stopped(self, message: dict) -> bool:
+        """
+        检查任务是否已被停止
+
+        在接收消息的最初阶段就检查，避免处理已停止的任务
+
+        Args:
+            message: 任务消息
+
+        Returns:
+            任务是否已被停止（True=已停止，False=未停止）
+        """
+        try:
+            script_data = message.get("script_data", {})
+            parent_execution_id = script_data.get("parent_execution_id")
+            execution_id = message.get("execution_id", "")
+
+            if not parent_execution_id and not execution_id:
+                # 没有执行ID，可能是旧格式的消息
+                return False
+
+            # 【关键修复】先检查本地缓存，避免重复查询
+            with self._stopped_cache_lock:
+                if parent_execution_id in self._stopped_parent_executions:
+                    logger.info(f"[停止检查-缓存] 父任务 {parent_execution_id} 已停止（缓存命中），拒绝接收任务")
+                    return True
+
+            import requests
+            api_base = self.config.server_url.rstrip('/')
+
+            # 优先检查父任务状态
+            if parent_execution_id:
+                try:
+                    status_check_url = f"{api_base}/api/executions/{parent_execution_id}/status_check/"
+                    response = requests.get(status_check_url, timeout=2)
+                    if response.status_code == 200:
+                        data = response.json()
+                        parent_status = data.get("status", "")
+                        if parent_status == "stopped":
+                            # 【关键修复】将已确认停止的父执行ID加入缓存
+                            with self._stopped_cache_lock:
+                                if parent_execution_id not in self._stopped_parent_executions:
+                                    self._stopped_parent_executions.append(parent_execution_id)
+                                    # 如果缓存超过限制，移除最旧的条目
+                                    if len(self._stopped_parent_executions) > self._stopped_cache_max_size:
+                                        self._stopped_parent_executions.pop(0)
+                            logger.info(f"[停止检查] 父任务 {parent_execution_id} 已停止，加入缓存并拒绝接收任务")
+                            return True
+                except:
+                    pass  # 查询失败，继续处理
+
+            # 检查子执行状态
+            if execution_id:
+                try:
+                    status_check_url = f"{api_base}/api/executions/{execution_id}/status_check/"
+                    response = requests.get(status_check_url, timeout=2)
+                    if response.status_code == 200:
+                        data = response.json()
+                        exec_status = data.get("status", "")
+                        if exec_status == "stopped":
+                            logger.info(f"[停止检查] 执行 {execution_id} 已停止，拒绝接收任务")
+                            return True
+                except:
+                    pass  # 查询失败，继续处理
+
+            # 默认任务未停止
+            return False
+
+        except Exception as e:
+            logger.debug(f"检查任务停止状态时出错: {e}")
+            return False
+
+    def _should_requeue_task(self, message: dict) -> bool:
+        """
+        判断被拒绝的任务是否应该重新入队
+
+        如果任务已被停止（父任务或子任务状态为 stopped），则不重新入队
+
+        Args:
+            message: 任务消息
+
+        Returns:
+            是否应该重新入队
+        """
+        try:
+            script_data = message.get("script_data", {})
+            parent_execution_id = script_data.get("parent_execution_id")
+            execution_id = message.get("execution_id", "")
+
+            if not parent_execution_id and not execution_id:
+                # 没有执行ID，可能是旧格式的消息，保守处理重新入队
+                return True
+
+            # 【关键修复】先检查本地缓存
+            with self._stopped_cache_lock:
+                if parent_execution_id in self._stopped_parent_executions:
+                    logger.info(f"[停止检查-缓存] 父任务 {parent_execution_id} 已停止（缓存命中），任务不重新入队")
+                    return False
+
+            import requests
+            api_base = self.config.server_url.rstrip('/')
+
+            # 优先检查父任务状态
+            if parent_execution_id:
+                try:
+                    status_check_url = f"{api_base}/api/executions/{parent_execution_id}/status_check/"
+                    response = requests.get(status_check_url, timeout=2)
+                    if response.status_code == 200:
+                        data = response.json()
+                        parent_status = data.get("status", "")
+                        if parent_status == "stopped":
+                            # 【关键修复】将已确认停止的父执行ID加入缓存
+                            with self._stopped_cache_lock:
+                                if parent_execution_id not in self._stopped_parent_executions:
+                                    self._stopped_parent_executions.append(parent_execution_id)
+                                    # 如果缓存超过限制，移除最旧的条目
+                                    if len(self._stopped_parent_executions) > self._stopped_cache_max_size:
+                                        self._stopped_parent_executions.pop(0)
+                            logger.info(f"父任务 {parent_execution_id} 已停止，加入缓存且任务不重新入队")
+                            return False
+                except:
+                    pass  # 查询失败，保守处理
+
+            # 检查子执行状态
+            if execution_id:
+                try:
+                    status_check_url = f"{api_base}/api/executions/{execution_id}/status_check/"
+                    response = requests.get(status_check_url, timeout=2)
+                    if response.status_code == 200:
+                        data = response.json()
+                        exec_status = data.get("status", "")
+                        if exec_status == "stopped":
+                            logger.info(f"执行 {execution_id} 已停止，任务不重新入队")
+                            return False
+                except:
+                    pass  # 查询失败，保守处理
+
+            # 默认重新入队
+            return True
+
+        except Exception as e:
+            logger.debug(f"检查任务状态时出错: {e}")
+            return True
 
     def start(self) -> bool:
         """

@@ -36,6 +36,12 @@ class TaskManagerV2:
         self.running_tasks: Dict[str, Dict[str, Any]] = {}  # task_id -> task_info
         self.cancelled_tasks: set = set()
 
+        # 【修复】停止的父执行集合，记录已被用户停止的父执行ID
+        # 使用列表+锁来管理，支持清理过期条目
+        self._stopped_executions_list: list = []
+        self._stopped_executions_lock = threading.Lock()
+        self._stopped_cache_max_size = 100
+
         # 保存计划执行信息（用于GUI显示），任务完成后不删除
         self.plan_executions: Dict[str, Dict[str, Any]] = {}  # parent_execution_id -> plan_info
 
@@ -165,6 +171,10 @@ class TaskManagerV2:
     def _send_heartbeat(self):
         """发送心跳"""
         try:
+            # 【关键修复】定期检查所有正在执行的父任务状态
+            # 如果发现父任务已停止，则标记到 _stopped_executions 集合中
+            self._check_running_parent_executions()
+
             # 获取系统资源使用情况
             resources = get_resource_usage()
             current_tasks = len(self.running_tasks)
@@ -203,6 +213,65 @@ class TaskManagerV2:
         except Exception as e:
             logger.error(f"心跳上报异常: {e}")
 
+    def _check_running_parent_executions(self):
+        """
+        检查所有正在执行的父任务状态
+        如果发现已停止的父任务，则标记到 _stopped_executions_list 中
+        """
+        try:
+            # 获取所有正在执行的父执行ID
+            parent_ids = set()
+            with self._stopped_executions_lock:
+                stopped_set = set(self._stopped_executions_list)
+
+            for task_id, task_info in self.running_tasks.items():
+                script_data = task_info.get("script_data", {})
+                parent_id = script_data.get("parent_execution_id")
+                if parent_id and parent_id not in stopped_set:
+                    parent_ids.add(parent_id)
+
+            # 批量查询这些父执行的状态
+            if parent_ids:
+                api_base = self.config.server_url.rstrip('/')
+                for parent_id in parent_ids:
+                    try:
+                        status_check_url = f"{api_base}/api/executions/{parent_id}/status_check/"
+                        response = requests.get(status_check_url, timeout=2)
+                        if response.status_code == 200:
+                            data = response.json()
+                            status = data.get("status", "")
+                            if status == "stopped":
+                                logger.warning(f"[心跳检查] 父执行 {parent_id} 已停止，加入停止列表")
+                                with self._stopped_executions_lock:
+                                    if parent_id not in self._stopped_executions_list:
+                                        self._stopped_executions_list.append(parent_id)
+                                        # 限制缓存大小，移除最旧的条目
+                                        if len(self._stopped_executions_list) > self._stopped_cache_max_size:
+                                            self._stopped_executions_list.pop(0)
+                    except:
+                        pass  # 查询失败，下次心跳再试
+
+            # 【修复】定期清理已完成的停止执行ID
+            # 检查缓存中的父执行ID是否还在running_tasks中，如果不在则可以清理
+            with self._stopped_executions_lock:
+                if len(self._stopped_executions_list) > 10:  # 只有缓存较大时才清理
+                    # 获取当前所有运行任务的父执行ID
+                    current_parent_ids = set()
+                    for task_info in self.running_tasks.values():
+                        script_data = task_info.get("script_data", {})
+                        parent_id = script_data.get("parent_execution_id")
+                        if parent_id:
+                            current_parent_ids.add(parent_id)
+
+                    # 保留仍然在运行中的父执行ID
+                    self._stopped_executions_list = [
+                        pid for pid in self._stopped_executions_list
+                        if pid in current_parent_ids
+                    ]
+
+        except Exception as e:
+            logger.debug(f"检查父执行状态异常: {e}")
+
     def on_task_received(self, task_data: Dict[str, Any]) -> bool:
         """
         收到任务时的回调（在消息队列线程中调用）
@@ -220,22 +289,46 @@ class TaskManagerV2:
         parent_execution_id = script_data.get("parent_execution_id")
         plan_scripts = script_data.get("plan_scripts", [])
 
-        # 【关键修复】先加入 running_tasks，再检查并发限制
-        # 这样可以避免竞态条件：多个任务同时到达时都能看到对方的占用
+        # 【关键修复】在接收任务前，向后端验证任务状态
+        # 检查父任务是否已被停止
+        if parent_execution_id:
+            if not self._validate_task_status(task_data):
+                logger.warning(f"任务 {task_id} 的父任务已停止，拒绝接收")
+                return False  # 返回 False 拒绝任务
+
+        # 【修复】先检查并发限制，再决定是否接收任务
+        # 必须在加入 running_tasks 之前检查，避免超出限制
+        current_tasks = len(self.running_tasks)
+        logger.info(f"[并发检查] 任务 {task_id} 到达，当前任务数={current_tasks}，最大并发={self.config.max_concurrent}")
+
+        if current_tasks >= self.config.max_concurrent:
+            # 超过限制，拒绝任务
+            logger.warning(f"执行机已达到最大并发数 ({self.config.max_concurrent})，当前任务数={current_tasks}，拒绝接收新任务 {task_id}")
+            return False  # 返回 False 拒绝任务，消息会重新入队（requeue=True）
+
+        # 【修复】对于顺序执行，需要检查是否有同父任务正在执行
+        if execution_mode == 'sequential' and parent_execution_id:
+            # 检查是否有相同父执行ID的任务正在运行
+            for running_task_id, running_task_info in self.running_tasks.items():
+                running_script_data = running_task_info.get("script_data", {})
+                running_parent_id = running_script_data.get("parent_execution_id")
+                if running_parent_id == parent_execution_id:
+                    # 有同父任务正在执行，将当前任务加入等待队列
+                    with self._wait_lock:
+                        if parent_execution_id not in self._sequential_wait_queue:
+                            self._sequential_wait_queue[parent_execution_id] = []
+                        self._sequential_wait_queue[parent_execution_id].append(task_data)
+                    logger.info(f"顺序执行：父任务 {parent_execution_id} 有任务正在执行，任务 {task_id} 加入等待队列")
+                    return True  # 返回 True 表示任务已接收（ACK），但放入等待队列
+
+        # 通过检查，加入 running_tasks
         execution_id = task_data.get("execution_id")
         self.running_tasks[task_id] = {
             "execution_id": execution_id,
             "script_name": script_name,
             "status": "starting",  # 初始状态为 starting
+            "script_data": script_data  # 【修复】保存 script_data，用于后续检查
         }
-
-        # 现在检查并发限制
-        current_tasks = len(self.running_tasks)
-        if current_tasks > self.config.max_concurrent:
-            # 超过限制，从 running_tasks 中移除并拒绝任务
-            del self.running_tasks[task_id]
-            logger.warning(f"执行机已达到最大并发数 ({self.config.max_concurrent})，拒绝接收新任务 {task_id}")
-            return False  # 返回 False 拒绝任务，消息会重新入队（requeue=True）
 
         # 在新线程中执行任务
         thread = threading.Thread(
@@ -247,6 +340,140 @@ class TaskManagerV2:
         thread.start()
 
         return True  # 返回 True 表示任务已接收（ACK），不等待执行完成
+
+    def _check_execution_status(self, execution_id: str, parent_execution_id: str = None) -> bool:
+        """
+        检查执行状态是否仍然有效（未被停止）
+
+        Args:
+            execution_id: 子执行ID
+            parent_execution_id: 父执行ID（如果存在）
+
+        Returns:
+            任务是否仍然有效（True=有效，False=已停止）
+        """
+        try:
+            api_base = self.config.server_url.rstrip('/')
+
+            # 优先检查父任务状态（如果存在）
+            if parent_execution_id:
+                status_check_url = f"{api_base}/api/executions/{parent_execution_id}/status_check/"
+                response = requests.get(status_check_url, timeout=3)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    parent_status = data.get("status", "")
+
+                    # 如果父任务已停止，子任务也应该停止
+                    if parent_status == "stopped":
+                        logger.warning(f"父任务 {parent_execution_id} 已停止，子任务应停止执行")
+                        return False
+
+            # 检查子执行状态
+            status_check_url = f"{api_base}/api/executions/{execution_id}/status_check/"
+            response = requests.get(status_check_url, timeout=3)
+
+            if response.status_code == 200:
+                data = response.json()
+                exec_status = data.get("status", "")
+
+                # 如果任务已停止，返回False
+                if exec_status == "stopped":
+                    logger.warning(f"执行 {execution_id} 已停止")
+                    return False
+
+                return True
+            else:
+                # 查询失败，保守处理：允许继续执行
+                return True
+
+        except Exception as e:
+            # 查询异常，保守处理：允许继续执行
+            # 避免网络问题导致正常执行被中断
+            logger.debug(f"检查执行状态异常: {e}")
+            return True
+
+    def _check_parent_execution_status(self, parent_execution_id: str) -> bool:
+        """
+        检查父执行状态是否仍然有效（未被停止）
+
+        Args:
+            parent_execution_id: 父执行ID
+
+        Returns:
+            父执行是否仍然有效（True=有效，False=已停止）
+        """
+        try:
+            import requests
+            api_base = self.config.server_url.rstrip('/')
+            status_check_url = f"{api_base}/api/executions/{parent_execution_id}/status_check/"
+
+            response = requests.get(status_check_url, timeout=3)
+
+            if response.status_code == 200:
+                data = response.json()
+                parent_status = data.get("status", "")
+
+                if parent_status == "stopped":
+                    logger.warning(f"父执行 {parent_execution_id} 已停止")
+                    return False
+
+                return True
+            else:
+                # 查询失败，保守处理：允许继续执行
+                return True
+
+        except Exception as e:
+            # 查询异常，保守处理：允许继续执行
+            logger.debug(f"检查父执行状态异常: {e}")
+            return True
+
+    def _validate_task_status(self, task_data: Dict[str, Any]) -> bool:
+        """
+        向后端验证任务状态
+
+        检查父任务是否已被停止，如果停止则返回False
+
+        Args:
+            task_data: 任务数据
+
+        Returns:
+            任务是否仍然有效（True=有效，False=已停止）
+        """
+        try:
+            script_data = task_data.get("script_data", {})
+            parent_execution_id = script_data.get("parent_execution_id")
+
+            if not parent_execution_id:
+                # 没有父任务，是单个脚本执行，直接返回有效
+                return True
+
+            # 向后端查询父任务状态
+            api_base = self.config.server_url.rstrip('/')
+            status_check_url = f"{api_base}/api/executions/{parent_execution_id}/status_check/"
+
+            response = requests.get(status_check_url, timeout=5)
+
+            if response.status_code == 200:
+                data = response.json()
+                status = data.get("status", "")
+                is_valid = data.get("is_valid", False)
+
+                # 如果父任务已停止，返回False
+                if status == "stopped":
+                    logger.warning(f"父任务 {parent_execution_id} 已停止，任务无效")
+                    return False
+
+                return True
+            else:
+                # 查询失败，保守处理：允许任务执行
+                logger.warning(f"查询父任务状态失败: HTTP {response.status_code}，允许任务执行")
+                return True
+
+        except Exception as e:
+            # 查询异常，保守处理：允许任务执行
+            logger.warning(f"验证任务状态异常: {e}，允许任务执行")
+            return True
 
     def _execute_task_thread(self, task_data: Dict[str, Any]):
         """
@@ -313,6 +540,38 @@ class TaskManagerV2:
         executor = None
 
         try:
+            # 【修复】在启动浏览器之前，检查父执行是否已被停止
+            if parent_execution_id:
+                # 先检查本地缓存的停止列表
+                with self._stopped_executions_lock:
+                    if parent_execution_id in self._stopped_executions_list:
+                        logger.info(f"任务 {task_id}: 父执行 {parent_execution_id} 已停止（本地缓存），不执行此任务")
+                        result = {
+                            "success": False,
+                            "message": "父执行已被用户停止",
+                            "cancelled": True
+                        }
+                        self.cancelled_tasks.add(task_id)
+                        raise Exception("父执行已被停止")
+
+                # 再向后端查询父执行状态
+                if not self._check_parent_execution_status(parent_execution_id):
+                    logger.info(f"任务 {task_id}: 父执行 {parent_execution_id} 已停止（后端查询），加入停止列表并停止")
+                    # 将父执行ID加入停止列表，这样后续任务也会被停止
+                    with self._stopped_executions_lock:
+                        if parent_execution_id not in self._stopped_executions_list:
+                            self._stopped_executions_list.append(parent_execution_id)
+                            # 限制缓存大小
+                            if len(self._stopped_executions_list) > self._stopped_cache_max_size:
+                                self._stopped_executions_list.pop(0)
+                    result = {
+                        "success": False,
+                        "message": "父执行已被用户停止",
+                        "cancelled": True
+                    }
+                    self.cancelled_tasks.add(task_id)
+                    raise Exception("父执行已被停止")
+
             # 检查任务是否已被取消
             if task_id in self.cancelled_tasks:
                 raise Exception("任务已被取消")
@@ -390,12 +649,23 @@ class TaskManagerV2:
                 final_status = "failed"
                 final_message = "执行失败"
 
-            # 【关键修复】更新 plan_executions 中的脚本状态
+            # 【修复】更新 plan_executions 中的脚本状态，并在全部完成后清理
             if parent_execution_id and parent_execution_id in self.plan_executions:
                 if 0 <= script_index < len(self.plan_executions[parent_execution_id]["scripts"]):
                     old_status = self.plan_executions[parent_execution_id]["scripts"][script_index]["status"]
                     self.plan_executions[parent_execution_id]["scripts"][script_index]["status"] = final_status
                     logger.info(f"任务完成后更新脚本状态: index={script_index}, {old_status} -> {final_status}")
+
+                    # 【修复】检查是否所有脚本都已完成，如果是则清理 plan_executions
+                    all_finished = True
+                    for script_info in self.plan_executions[parent_execution_id]["scripts"]:
+                        if script_info["status"] in ["waiting", "running"]:
+                            all_finished = False
+                            break
+
+                    if all_finished:
+                        logger.info(f"父执行 {parent_execution_id} 所有脚本已完成，清理 plan_executions 缓存")
+                        del self.plan_executions[parent_execution_id]
 
             # 【关键修复】检查并触发等待队列中的下一个任务
             if parent_execution_id:
@@ -432,8 +702,43 @@ class TaskManagerV2:
         """
         steps = script_data.get("steps", [])
         script_name = script_data.get("name", "未命名脚本")
+        execution_id = script_data.get("execution_id", "")
+        parent_execution_id = script_data.get("parent_execution_id")
 
         logger.info(f"任务 {task_id}: 脚本 '{script_name}' 共有 {len(steps)} 个步骤")
+
+        # 【修复】在执行任何步骤之前，先检查父执行是否已被停止
+        # 这是为了处理以下场景：
+        # 1. 任务在停止之前通过了并发检查，线程已启动
+        # 2. 用户点击停止
+        # 3. 当有任务完成时，这个任务的线程继续执行
+        if parent_execution_id:
+            # 先检查本地缓存
+            with self._stopped_executions_lock:
+                if parent_execution_id in self._stopped_executions_list:
+                    logger.info(f"任务 {task_id}: 父执行 {parent_execution_id} 已停止（本地缓存），不执行脚本")
+                    return {
+                        "success": False,
+                        "message": "父执行已被用户停止",
+                        "steps": [],
+                        "cancelled": True
+                    }
+
+            # 再向后端查询
+            if not self._check_parent_execution_status(parent_execution_id):
+                logger.info(f"任务 {task_id}: 父执行 {parent_execution_id} 已停止（后端查询），不执行脚本")
+                with self._stopped_executions_lock:
+                    if parent_execution_id not in self._stopped_executions_list:
+                        self._stopped_executions_list.append(parent_execution_id)
+                        # 限制缓存大小
+                        if len(self._stopped_executions_list) > self._stopped_cache_max_size:
+                            self._stopped_executions_list.pop(0)
+                return {
+                    "success": False,
+                    "message": "父执行已被用户停止",
+                    "steps": [],
+                    "cancelled": True
+                }
 
         results = []
         all_success = True
@@ -441,14 +746,29 @@ class TaskManagerV2:
         start_time = time.time()
 
         for index, step in enumerate(steps):
-            # 检查任务是否被取消
+            # 【关键修复】检查任务是否被取消
             if task_id in self.cancelled_tasks:
+                logger.info(f"任务 {task_id} 已被取消（本地标记）")
                 return {
                     "success": False,
                     "message": "任务已被取消",
                     "steps": results,
                     "cancelled": True
                 }
+
+            # 【关键修复】定期检查后端状态，确认任务是否仍然有效
+            # 每隔几个步骤检查一次，避免频繁请求
+            if index % 3 == 0:  # 每3个步骤检查一次
+                if not self._check_execution_status(execution_id, parent_execution_id):
+                    logger.info(f"任务 {task_id} 已被后端停止")
+                    # 将任务添加到取消集合
+                    self.cancelled_tasks.add(task_id)
+                    return {
+                        "success": False,
+                        "message": "任务已被用户停止",
+                        "steps": results,
+                        "cancelled": True
+                    }
 
             step_name = step.get("name", f"步骤{index + 1}")
             step_type = step.get("type", "")
@@ -595,6 +915,32 @@ class TaskManagerV2:
         Args:
             parent_execution_id: 父执行ID
         """
+        # 【修复】只有在没有同父任务正在运行时才触发下一个任务
+        # 这确保了顺序执行：一次只运行一个同父执行的任务
+
+        # 首先检查并发限制（注意：当前任务刚完成，所以有一个空位）
+        current_tasks = len(self.running_tasks)
+        if current_tasks >= self.config.max_concurrent:
+            logger.debug(f"达到最大并发数 ({self.config.max_concurrent})，不触发等待队列中的任务")
+            return
+
+        # 检查是否还有同父任务正在运行（排除刚刚完成的任务）
+        has_running_sibling = False
+        for task_id, task_info in self.running_tasks.items():
+            script_data = task_info.get("script_data", {})
+            running_parent_id = script_data.get("parent_execution_id")
+            if running_parent_id == parent_execution_id:
+                has_running_sibling = True
+                break
+
+        if has_running_sibling:
+            # 还有同父任务正在运行，不触发下一个任务
+            logger.debug(f"父执行 {parent_execution_id} 仍有任务正在运行，不触发等待队列中的任务")
+            return
+
+        # 没有同父任务正在运行，可以从等待队列中取下一个任务
+        next_task_data = None
+        next_task_id = None
 
         with self._wait_lock:
             if parent_execution_id in self._sequential_wait_queue:
@@ -608,16 +954,26 @@ class TaskManagerV2:
                     if not wait_queue:
                         del self._sequential_wait_queue[parent_execution_id]
 
-                    logger.info(f"从等待队列中取下一个任务: {next_task_id}")
+        # 在锁外执行任务，避免持有锁的时间过长
+        if next_task_data:
+            logger.info(f"从等待队列中取下一个任务: {next_task_id}")
 
-                    # 在新线程中执行下一个任务
-                    thread = threading.Thread(
-                        target=self._execute_task_thread,
-                        args=(next_task_data,),
-                        daemon=True,
-                        name=f"Task-{next_task_id}"
-                    )
-                    thread.start()
+            # 在执行之前，先将任务加入 running_tasks，防止并发问题
+            self.running_tasks[next_task_id] = {
+                "execution_id": next_task_data.get("execution_id"),
+                "script_name": next_task_data.get("script_data", {}).get("name", "未命名脚本"),
+                "status": "running",
+                "script_data": next_task_data.get("script_data", {})
+            }
+
+            # 在新线程中执行下一个任务
+            thread = threading.Thread(
+                target=self._execute_task_thread,
+                args=(next_task_data,),
+                daemon=True,
+                name=f"Task-{next_task_id}"
+            )
+            thread.start()
 
     def _send_screenshot(self, task_id: str, image_data: str, is_failure: bool = True):
         """发送截图到平台"""
@@ -667,7 +1023,16 @@ class TaskManagerV2:
         for task_id in list(self.running_tasks.keys()):
             self.cancelled_tasks.add(task_id)
 
-        logger.info("任务管理器已断开连接")
+        # 【修复】清理所有缓存，释放内存
+        self.running_tasks.clear()
+        self.cancelled_tasks.clear()
+        with self._stopped_executions_lock:
+            self._stopped_executions_list.clear()
+        with self._wait_lock:
+            self._sequential_wait_queue.clear()
+        self.plan_executions.clear()
+
+        logger.info("任务管理器已断开连接并清理缓存")
 
 
 # 单例

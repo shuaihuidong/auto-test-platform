@@ -7,6 +7,9 @@ from django.utils import timezone
 from .models import Execution
 from .serializers import ExecutionSerializer, ExecutionCreateSerializer
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionViewSet(viewsets.ModelViewSet):
@@ -88,12 +91,13 @@ class ExecutionViewSet(viewsets.ModelViewSet):
                 created_by=request.user
             )
 
-            # 为每个脚本创建子执行记录
+            # 【修复】为每个脚本创建子执行记录，先批量创建所有执行记录，确保 ID 连续
             child_executions = []
 
             # 准备计划中所有脚本的信息（用于执行机显示）
             plan_scripts_info = []
-            for script in scripts:
+            scripts_list = list(scripts)  # 转换为列表以支持多次迭代
+            for script in scripts_list:
                 plan_scripts_info.append({
                     'id': script.id,
                     'name': script.name,
@@ -102,7 +106,8 @@ class ExecutionViewSet(viewsets.ModelViewSet):
                     'step_count': len(script.steps) if script.steps else 0
                 })
 
-            for index, script in enumerate(scripts):
+            # 第一阶段：创建所有子执行记录（不创建 TaskQueue）
+            for index, script in enumerate(scripts_list):
                 # 创建子执行记录
                 child_execution = Execution.objects.create(
                     execution_type='script',
@@ -112,8 +117,15 @@ class ExecutionViewSet(viewsets.ModelViewSet):
                     status='pending',
                     created_by=request.user
                 )
+                child_executions.append(child_execution)
 
-                # 创建任务
+            # 第二阶段：为每个子执行创建任务
+            from apps.executors.models import TaskQueue
+
+            for index, script in enumerate(scripts_list):
+                child_execution = child_executions[index]
+
+                # 创建任务数据
                 task_data = self._prepare_script_data(script)
                 task_data['plan_id'] = plan.id
                 task_data['plan_name'] = plan.name
@@ -123,9 +135,7 @@ class ExecutionViewSet(viewsets.ModelViewSet):
                 # 添加完整的计划脚本信息
                 task_data['plan_scripts'] = plan_scripts_info
                 task_data['script_index'] = index  # 脚本在计划中的顺序
-                task_data['total_scripts'] = len(scripts)  # 总脚本数
-
-                from apps.executors.models import TaskQueue
+                task_data['total_scripts'] = len(scripts_list)  # 总脚本数
 
                 # 根据执行模式设置优先级
                 # 顺序执行：后面的任务优先级较低，确保按顺序执行
@@ -149,8 +159,6 @@ class ExecutionViewSet(viewsets.ModelViewSet):
                         script_data=task_data,
                         priority=priority
                     )
-
-                child_executions.append(child_execution)
 
             # 触发任务分发
             from services.task_distributor import TaskDistributor
@@ -240,31 +248,62 @@ class ExecutionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 取消待分配的任务
-        from services.task_distributor import TaskDistributor
-        if execution.status == 'pending':
-            TaskDistributor().cancel_pending_tasks(execution.id)
+        # 保存原始状态，用于后续判断
+        original_status = execution.status
 
-        # 更新状态
+        # 先更新父执行状态为stopped（这样任务分发时会检测到并跳过）
         execution.status = 'stopped'
         execution.completed_at = timezone.now()
         execution.save()
 
-        # 如果正在执行，通过 WebSocket 通知执行机停止
-        if execution.status == 'running':
-            from channels.layers import get_channel_layer
-            from asgiref.sync import async_to_sync
+        # 取消所有子任务（包括 pending、assigned、running 状态）
+        from services.task_distributor import TaskDistributor
+        TaskDistributor().cancel_all_child_tasks(execution.id)
 
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f'execution_{execution.id}',
-                {
-                    'type': 'stop_execution',
-                    'data': {'execution_id': execution.id}
-                }
+        # 如果是计划执行，更新所有子执行的状态
+        if execution.execution_type == 'plan':
+            # 获取所有未完成的子执行
+            unfinished_children = Execution.objects.filter(
+                parent_id=execution.id,
+                status__in=['pending', 'running', 'paused']
             )
 
+            for child in unfinished_children:
+                # 将子执行状态更新为stopped
+                child.status = 'stopped'
+                child.completed_at = timezone.now()
+                # 更新 result 字段，添加停止原因
+                if not child.result:
+                    child.result = {}
+                child.result['success'] = False
+                child.result['message'] = '用户已停止执行'
+                child.result['error'] = '用户已停止执行'
+                child.result['stopped_at'] = timezone.now().isoformat()
+                child.save()
+
         return Response({'message': '已停止执行'})
+
+    @action(detail=True, methods=['get'], permission_classes=[])
+    def status_check(self, request, pk=None):
+        """
+        检查执行状态（轻量级接口，用于执行机验证任务是否有效）
+
+        返回执行状态，执行机根据状态决定是否接收任务
+        只有 running 状态的执行才是有效的
+
+        注意：此接口允许执行机（无认证）访问，用于停止检查逻辑
+        """
+        # 直接查询，避免使用 self.get_object() 导致的权限问题
+        from apps.executions.models import Execution
+        try:
+            execution = Execution.objects.get(pk=pk)
+        except Execution.DoesNotExist:
+            return Response({'error': '执行不存在'}, status=404)
+
+        return Response({
+            'status': execution.status,
+            'is_valid': execution.status == 'running'
+        })
 
     @action(detail=True, methods=['post'])
     def debug(self, request, pk=None):
