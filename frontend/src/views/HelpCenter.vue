@@ -139,10 +139,29 @@
             <div class="info-box">
               <p><strong>执行机</strong>是运行在您本地机器上的软件程序，负责：</p>
               <ul>
-                <li>📡 与平台服务器通信，接收测试任务</li>
+                <li>📡 通过 RabbitMQ 消息队列接收测试任务</li>
                 <li>🌐 控制 Chrome/Firefox/Edge 浏览器</li>
                 <li>📸 执行测试步骤，截图记录</li>
-                <li>📤 上传执行日志和结果到平台</li>
+                <li>📤 通过 HTTP API 上报执行结果</li>
+                <li>💓 定时发送心跳保持在线状态</li>
+                <li>⚡ 支持并发执行（默认同时3个任务）</li>
+              </ul>
+            </div>
+
+            <a-divider>系统架构说明</a-divider>
+
+            <div class="info-box" style="background: #f6f8fa; border-color: #d9d9d9;">
+              <p><strong>通信架构：</strong></p>
+              <ul>
+                <li><strong>任务接收</strong>：RabbitMQ 消息队列（可靠传递）</li>
+                <li><strong>结果上报</strong>：HTTP REST API</li>
+                <li><strong>心跳维持</strong>：HTTP POST 每30秒一次</li>
+              </ul>
+              <p><strong>优势：</strong></p>
+              <ul>
+                <li>✅ 消息不丢失（RabbitMQ 持久化）</li>
+                <li>✅ 支持多执行机负载均衡</li>
+                <li>✅ 执行机可离线，恢复后自动接收任务</li>
               </ul>
             </div>
 
@@ -186,38 +205,80 @@
               </a-col>
             </a-row>
 
+            <a-divider>环境要求</a-divider>
+
+            <a-card title="必需组件" size="small">
+              <a-row :gutter="16}">
+                <a-col :span="12">
+                  <h4>🐍 Python 环境</h4>
+                  <p>Python 3.8 或更高版本</p>
+                  <p class="text-gray">下载：<a href="https://www.python.org/downloads/" target="_blank">python.org</a></p>
+                </a-col>
+                <a-col :span="12">
+                  <h4>🐰 RabbitMQ 服务</h4>
+                  <p>3.12 或更高版本</p>
+                  <p class="text-gray">用于消息队列，必须先启动</p>
+                </a-col>
+              </a-row>
+            </a-card>
+
             <a-divider>安装步骤（以 Windows 为例）</a-divider>
 
-            <a-steps direction="vertical" :current="-1">
-              <a-step title="运行安装程序">
+            <a-steps direction="vertical" :current="-1}">
+              <a-step title="步骤1：安装 RabbitMQ">
                 <template #description>
                   <div class="step-detail">
-                    <p>下载完成后，双击 <code>AutoTestExecutor.exe</code> 文件</p>
-                    <div class="screenshot-placeholder">
-                      📷 <span>截图：双击运行安装程序</span>
-                    </div>
+                    <p>执行机依赖 RabbitMQ 消息队列，需要先安装：</p>
+                    <ol>
+                      <li>下载 Erlang/OTP（RabbitMQ 依赖）</li>
+                      <li>下载 RabbitMQ Server</li>
+                      <li>安装完成后启动服务：<code>rabbitmq-service start</code></li>
+                      <li>启用管理插件：<code>rabbitmq-plugins enable rabbitmq_management</code></li>
+                    </ol>
+                    <p>验证安装：访问 <a href="http://localhost:15672" target="_blank">http://localhost:15672</a> (guest/guest)</p>
+                    <a-alert type="info" show-icon message="提示：平台根目录提供了 setup_rabbitmq.ps1 脚本可快速安装" style="margin-top: 12px;" />
                   </div>
                 </template>
               </a-step>
 
-              <a-step title="配置向导 - 服务器设置">
+              <a-step title="步骤2：运行安装程序">
+                <template #description>
+                  <div class="step-detail">
+                    <p>下载完成后，双击 <code>AutoTestExecutor-Setup-v1.0.0.exe</code> 文件</p>
+                    <p>按照安装向导完成安装</p>
+                  </div>
+                </template>
+              </a-step>
+
+              <a-step title="步骤3：配置向导 - 服务器设置">
                 <template #description>
                   <div class="step-detail">
                     <p>首次运行会弹出配置向导，首先配置服务器信息：</p>
                     <ul>
-                      <li><strong>服务器地址</strong>：输入平台服务器地址</li>
-                      <li>本地开发：使用 <code>ws://localhost:8000</code></li>
-                      <li>生产环境：使用服务器实际地址，如 <code>wss://your-server.com</code></li>
+                      <li><strong>服务器地址</strong>：平台 API 地址</li>
+                      <li>本地开发：使用 <code>http://127.0.0.1:8000</code></li>
+                      <li>生产环境：使用服务器实际地址，如 <code>https://your-server.com</code></li>
                     </ul>
-                    <div class="screenshot-placeholder">
-                      📷 <span>截图：配置向导 - 服务器设置页面</span>
-                    </div>
-                    <a-alert type="warning" show-icon message="注意：地址必须以 ws:// 或 wss:// 开头" style="margin-top: 12px;" />
+                    <a-alert type="warning" show-icon message="注意：使用 HTTP 协议，不是 ws:// 或 wss://" style="margin-top: 12px;" />
                   </div>
                 </template>
               </a-step>
 
-              <a-step title="配置向导 - 执行机信息">
+              <a-step title="步骤4：配置向导 - RabbitMQ 设置">
+                <template #description>
+                  <div class="step-detail">
+                    <p>配置 RabbitMQ 连接信息：</p>
+                    <ul>
+                      <li><strong>主机地址</strong>：默认 <code>127.0.0.1</code></li>
+                      <li><strong>端口</strong>：默认 <code>5672</code>（注意不是管理端口 15672）</li>
+                      <li><strong>用户名</strong>：默认 <code>guest</code></li>
+                      <li><strong>密码</strong>：默认 <code>guest</code></li>
+                    </ul>
+                  </div>
+                </template>
+              </a-step>
+
+              <a-step title="步骤5：配置向导 - 执行机信息">
                 <template #description>
                   <div class="step-detail">
                     <p>设置执行机的身份信息：</p>
@@ -226,59 +287,63 @@
                       <li><strong>用户名</strong>：平台登录账号</li>
                       <li><strong>密码</strong>：平台登录密码</li>
                     </ul>
-                    <div class="screenshot-placeholder">
-                      📷 <span>截图：配置向导 - 执行机信息页面</span>
-                    </div>
                   </div>
                 </template>
               </a-step>
 
-              <a-step title="配置向导 - 浏览器设置">
+              <a-step title="步骤6：配置向导 - 浏览器设置">
                 <template #description>
                   <div class="step-detail">
                     <p>配置浏览器路径（可选）：</p>
                     <ul>
-                      <li>留空则自动检测或下载驱动</li>
+                      <li>留空则自动检测系统浏览器</li>
+                      <li>支持 Chrome、Firefox、Edge</li>
                       <li>如浏览器安装位置特殊，可手动指定路径</li>
                     </ul>
-                    <div class="screenshot-placeholder">
-                      📷 <span>截图：配置向导 - 浏览器配置页面</span>
-                    </div>
                   </div>
                 </template>
               </a-step>
 
-              <a-step title="配置向导 - 高级设置">
-                <template #description>
-                  <div class="step-detail">
-                    <p>配置执行参数（可选）：</p>
-                    <ul>
-                      <li><strong>最大并发</strong>：同时执行的任务数（默认3）</li>
-                      <li><strong>日志保留</strong>：日志文件保留天数（默认7天）</li>
-                    </ul>
-                    <div class="screenshot-placeholder">
-                      📷 <span>截图：配置向导 - 高级设置页面</span>
-                    </div>
-                  </div>
-                </template>
-              </a-step>
-
-              <a-step title="连接服务器">
+              <a-step title="步骤7：连接服务器">
                 <template #description>
                   <div class="step-detail">
                     <p>配置完成后，执行机主窗口会自动打开：</p>
                     <ol>
+                      <li>确认 RabbitMQ 服务已启动</li>
+                      <li>确认平台后端服务已启动</li>
                       <li>点击"连接服务器"按钮</li>
                       <li>状态变为"在线"表示连接成功</li>
-                      <li>此时执行机可以接收并执行任务</li>
                     </ol>
-                    <div class="screenshot-placeholder">
-                      📷 <span>截图：执行机主窗口，显示在线状态</span>
-                    </div>
+                    <a-alert type="success" show-icon message="连接成功后，执行机会自动创建专属队列并开始接收任务" style="margin-top: 12px;" />
                   </div>
                 </template>
               </a-step>
             </a-steps>
+
+            <a-divider>执行模式说明</a-divider>
+
+            <a-card title="支持的任务执行模式" size="small">
+              <a-row :gutter="16}">
+                <a-col :span="12">
+                  <h4>🔄 并发执行</h4>
+                  <p>多个任务同时执行</p>
+                  <ul>
+                    <li>默认最大并发数：3</li>
+                    <li>可配置调整</li>
+                    <li>充分利用系统资源</li>
+                  </ul>
+                </a-col>
+                <a-col :span="12">
+                  <h4>📋 顺序执行</h4>
+                  <p>按顺序一个一个执行</p>
+                  <ul>
+                    <li>前一个完成后执行下一个</li>
+                    <li>适用于有依赖关系的脚本</li>
+                    <li>在测试计划中配置</li>
+                  </ul>
+                </a-col>
+              </a-row>
+            </a-card>
 
             <a-divider>常见问题</a-divider>
 
@@ -287,20 +352,36 @@
                 <p><strong>可能原因：</strong></p>
                 <ul>
                   <li>服务器地址填写错误</li>
-                  <li>服务器未启动</li>
+                  <li>平台后端服务未启动</li>
                   <li>网络不通（防火墙阻止）</li>
                   <li>用户名或密码错误</li>
                 </ul>
                 <p><strong>解决方法：</strong></p>
                 <ul>
-                  <li>检查服务器地址是否正确（注意 ws:// 或 wss://）</li>
-                  <li>确认平台服务器已启动</li>
-                  <li>尝试在浏览器访问服务器地址测试连通性</li>
+                  <li>检查服务器地址是否正确（使用 http:// 或 https://）</li>
+                  <li>确认平台后端服务已启动（访问 API 地址测试）</li>
+                  <li>检查防火墙设置</li>
                   <li>检查用户名密码是否正确</li>
                 </ul>
               </a-collapse-panel>
 
-              <a-collapse-panel key="2" header="浏览器启动失败怎么办？">
+              <a-collapse-panel key="2" header="RabbitMQ 连接失败怎么办？">
+                <p><strong>可能原因：</strong></p>
+                <ul>
+                  <li>RabbitMQ 服务未启动</li>
+                  <li>地址或端口配置错误</li>
+                  <li>用户名密码错误</li>
+                </ul>
+                <p><strong>解决方法：</strong></p>
+                <ul>
+                  <li>检查 RabbitMQ 服务状态：<code>rabbitmq-service status</code></li>
+                  <li>确认端口是 5672（不是 15672）</li>
+                  <li>访问管理界面验证：<code>http://localhost:15672</code></li>
+                  <li>检查用户名密码是否为 guest/guest</li>
+                </ul>
+              </a-collapse-panel>
+
+              <a-collapse-panel key="3" header="浏览器启动失败怎么办？">
                 <p><strong>可能原因：</strong></p>
                 <ul>
                   <li>未安装浏览器</li>
@@ -314,13 +395,47 @@
                 </ul>
               </a-collapse-panel>
 
-              <a-collapse-panel key="3" header="如何修改配置？">
+              <a-collapse-panel key="4" header="如何修改配置？">
                 <p>已配置的执行机可以重新配置：</p>
                 <ol>
                   <li>点击主窗口"重新配置"按钮</li>
                   <li>或在配置文件中直接修改：<code>~/.executor/config.json</code></li>
                   <li>修改后重启执行机生效</li>
                 </ol>
+              </a-collapse-panel>
+
+              <a-collapse-panel key="5" header="执行机显示离线怎么办？">
+                <p><strong>检查清单：</strong></p>
+                <ul>
+                  <li>✅ 执行机程序是否正在运行</li>
+                  <li>✅ 是否已点击"连接服务器"按钮</li>
+                  <li>✅ RabbitMQ 服务是否已启动</li>
+                  <li>✅ 网络连接是否正常</li>
+                  <li>✅ 服务器地址是否正确</li>
+                  <li>✅ 用户名密码是否正确</li>
+                </ul>
+                <p><strong>解决方法：</strong></p>
+                <ul>
+                  <li>确认 RabbitMQ 已启动（访问管理界面）</li>
+                  <li>确认平台后端已启动</li>
+                  <li>重新点击"连接服务器"</li>
+                  <li>检查执行机日志窗口的错误信息</li>
+                </ul>
+              </a-collapse-panel>
+
+              <a-collapse-panel key="6" header="任务堆积不执行怎么办？">
+                <p><strong>可能原因：</strong></p>
+                <ul>
+                  <li>执行机已达到最大并发数</li>
+                  <li>执行机未正确连接到消息队列</li>
+                  <li>任务被停止或取消</li>
+                </ul>
+                <p><strong>解决方法：</strong></p>
+                <ul>
+                  <li>查看执行机当前运行任务数</li>
+                  <li>检查 RabbitMQ 队列状态</li>
+                  <li>在执行记录中查看任务状态</li>
+                </ul>
               </a-collapse-panel>
             </a-collapse>
           </div>
@@ -723,15 +838,37 @@
                 <template #description>
                   <p>配置执行参数：</p>
                   <ul>
-                    <li><strong>执行顺序</strong>：
+                    <li><strong>执行模式</strong>：
                       <ul>
-                        <li>串行：按顺序一个一个执行</li>
-                        <li>并行：同时执行所有脚本</li>
+                        <li><strong>并行执行</strong>：所有脚本同时执行（充分利用多执行机资源）</li>
+                        <li><strong>顺序执行</strong>：按脚本列表顺序一个一个执行（适用于有依赖关系的测试）</li>
                       </ul>
                     </li>
                     <li><strong>失败后继续</strong>：某个脚本失败后是否继续执行其他脚本</li>
                     <li><strong>Cron 表达式</strong>：设置定时执行（可选）</li>
                   </ul>
+                  <a-card title="执行模式对比" size="small" style="margin-top: 12px;">
+                    <a-row :gutter="16}">
+                      <a-col :span="12">
+                        <h4>🔄 并行执行</h4>
+                        <ul>
+                          <li>所有脚本同时开始执行</li>
+                          <li>充分利用多执行机并发能力</li>
+                          <li>执行时间 = 最慢脚本的时间</li>
+                          <li>适用于无依赖关系的独立测试</li>
+                        </ul>
+                      </a-col>
+                      <a-col :span="12">
+                        <h4>📋 顺序执行</h4>
+                        <ul>
+                          <li>按顺序执行，前一个完成后才执行下一个</li>
+                          <li>确保执行顺序</li>
+                          <li>执行时间 = 所有脚本时间之和</li>
+                          <li>适用于有依赖关系的测试场景</li>
+                        </ul>
+                      </a-col>
+                    </a-row>
+                  </a-card>
                   <div class="code-example">
                     <p><strong>Cron 表达式示例：</strong></p>
                     <ul>
@@ -769,7 +906,7 @@
                   <ol>
                     <li>进入脚本列表</li>
                     <li>点击脚本右侧的"运行"按钮</li>
-                    <li>选择执行机</li>
+                    <li>选择执行机（可选）</li>
                     <li>查看实时执行日志</li>
                   </ol>
                 </a-card>
@@ -794,8 +931,48 @@
               <a-descriptions-item label="🔵 执行中">脚本正在执行</a-descriptions-item>
               <a-descriptions-item label="🟢 已完成">执行成功</a-descriptions-item>
               <a-descriptions-item label="🔴 已失败">执行失败，可查看错误日志</a-descriptions-item>
-              <a-descriptions-item label="⚪ 已取消">任务被手动取消</a-descriptions-item>
+              <a-descriptions-item label="⚫ 已停止">任务被手动停止</a-descriptions-item>
             </a-descriptions>
+
+            <a-divider>执行控制</a-divider>
+
+            <a-card title="支持的操作" size="small">
+              <a-row :gutter="16}">
+                <a-col :span="8">
+                  <div class="action-item">
+                    <h4>⏹️ 停止执行</h4>
+                    <p>手动停止正在执行的任务</p>
+                    <ul>
+                      <li>单脚本：直接停止</li>
+                      <li>计划执行：停止所有子任务</li>
+                      <li>支持停止等待中的任务</li>
+                    </ul>
+                  </div>
+                </a-col>
+                <a-col :span="8">
+                  <div class="action-item">
+                    <h4>🔄 重新执行</h4>
+                    <p>再次执行失败的脚本</p>
+                    <ul>
+                      <li>一键重新执行</li>
+                      <li>保留原始参数</li>
+                      <li>生成新的执行记录</li>
+                    </ul>
+                  </div>
+                </a-col>
+                <a-col :span="8">
+                  <div class="action-item">
+                    <h4>📋 查看日志</h4>
+                    <p>查看详细执行日志</p>
+                    <ul>
+                      <li>实时日志推送</li>
+                      <li>步骤执行详情</li>
+                      <li>错误堆栈信息</li>
+                    </ul>
+                  </div>
+                </a-col>
+              </a-row>
+            </a-card>
 
             <a-divider>实时日志</a-divider>
 
@@ -805,35 +982,50 @@
               <li>页面加载时间</li>
               <li>元素定位结果</li>
               <li>错误信息和堆栈</li>
+              <li>失败步骤的截图</li>
             </ul>
 
             <a-divider>执行选项</a-divider>
 
             <a-collapse>
-              <a-collapse-panel key="1" header="并发执行">
+              <a-collapse-panel key="1" header="并发执行模式">
                 <p>同时运行多个测试用例：</p>
                 <ul>
-                  <li>执行机支持配置最大并发数</li>
-                  <li>计划执行时可选择并行模式</li>
-                  <li>充分利用执行机资源</li>
+                  <li>执行机默认最大并发数：3</li>
+                  <li>可在执行机配置中调整</li>
+                  <li>计划执行时选择"并行"模式</li>
+                  <li>充分利用执行机资源提高效率</li>
+                </ul>
+                <a-alert type="info" show-icon message="提示：达到最大并发后，新任务会等待直到有可用槽位" style="margin-top: 8px;" />
+              </a-collapse-panel>
+
+              <a-collapse-panel key="2" header="顺序执行模式">
+                <p>按顺序一个一个执行脚本：</p>
+                <ul>
+                  <li>计划执行时选择"顺序"模式</li>
+                  <li>前一个脚本完成后才执行下一个</li>
+                  <li>适用于有依赖关系的测试场景</li>
+                  <li>中间某个脚本失败不会影响后续脚本</li>
                 </ul>
               </a-collapse-panel>
 
-              <a-collapse-panel key="2" header="失败重试">
-                <p>自动重试失败的步骤：</p>
+              <a-collapse-panel key="3" header="选择执行机">
+                <p>手动指定或自动分配执行机：</p>
                 <ul>
-                  <li>可配置重试次数</li>
-                  <li>每次重试间隔时间</li>
-                  <li>减少因偶发问题导致的失败</li>
+                  <li><strong>自动分配</strong>：系统选择可用执行机</li>
+                  <li><strong>手动指定</strong>：选择特定执行机执行</li>
+                  <li>支持按项目分组配置专属执行机</li>
+                  <li>离线执行机不会被分配任务</li>
                 </ul>
               </a-collapse-panel>
 
-              <a-collapse-panel key="3" header="条件执行">
-                <p>根据上一步结果决定是否继续：</p>
+              <a-collapse-panel key="4" header="调试模式">
+                <p>单步调试脚本：</p>
                 <ul>
-                  <li>失败后停止执行</li>
-                  <li>失败后继续执行</li>
-                  <li>灵活应对不同测试场景</li>
+                  <li>在脚本编辑器中启用调试</li>
+                  <li>支持设置断点</li>
+                  <li>单步执行每个步骤</li>
+                  <li>查看变量值变化</li>
                 </ul>
               </a-collapse-panel>
             </a-collapse>
