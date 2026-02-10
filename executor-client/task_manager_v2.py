@@ -19,15 +19,6 @@ from executor import ScriptExecutor
 from message_queue_client import get_message_queue_consumer
 from utils.system import get_resource_usage
 
-# 添加文件日志（用于调试）
-logger.add(
-    "debug_executor.log",
-    rotation="10 MB",
-    retention="3 days",
-    level="DEBUG",
-    enqueue=True
-)
-
 
 class TaskManagerV2:
     """
@@ -246,12 +237,6 @@ class TaskManagerV2:
             logger.warning(f"执行机已达到最大并发数 ({self.config.max_concurrent})，拒绝接收新任务 {task_id}")
             return False  # 返回 False 拒绝任务，消息会重新入队（requeue=True）
 
-        # 使用print确保日志能立即看到
-
-
-        if parent_execution_id:
-            for idx, script in enumerate(plan_scripts):
-
         # 在新线程中执行任务
         thread = threading.Thread(
             target=self._execute_task_thread,
@@ -314,14 +299,12 @@ class TaskManagerV2:
                         "index": idx
                     })
             else:
-
-            # 更新当前脚本状态为 running
-            script_index = script_data.get("script_index", -1)
-            if 0 <= script_index < len(self.plan_executions[parent_execution_id]["scripts"]):
-                old_status = self.plan_executions[parent_execution_id]["scripts"][script_index]["status"]
-                self.plan_executions[parent_execution_id]["scripts"][script_index]["status"] = "running"
-                script_name = self.plan_executions[parent_execution_id]['scripts'][script_index]['name']
-        else:
+                # 更新当前脚本状态为 running
+                script_index = script_data.get("script_index", -1)
+                if 0 <= script_index < len(self.plan_executions[parent_execution_id]["scripts"]):
+                    old_status = self.plan_executions[parent_execution_id]["scripts"][script_index]["status"]
+                    self.plan_executions[parent_execution_id]["scripts"][script_index]["status"] = "running"
+                    script_name = self.plan_executions[parent_execution_id]['scripts'][script_index]['name']
 
         # 初始化结果变量
         result = None
@@ -635,8 +618,6 @@ class TaskManagerV2:
                         name=f"Task-{next_task_id}"
                     )
                     thread.start()
-                else:
-            else:
 
     def _send_screenshot(self, task_id: str, image_data: str, is_failure: bool = True):
         """发送截图到平台"""

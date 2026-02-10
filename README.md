@@ -760,6 +760,7 @@ curl -X POST http://localhost:8000/api/executor/heartbeat/ \
 
 | 文档 | 说明 |
 |------|------|
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | **系统架构文档** - 任务分发机制、执行模式详解 |
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | 详细的生产环境部署指南 |
 | [MQ_SUMMARY.md](./MQ_SUMMARY.md) | 消息队列架构迁移总结 |
 | [RABBITMQ_INSTALL.md](./RABBITMQ_INSTALL.md) | RabbitMQ 安装指南 |
@@ -831,4 +832,4 @@ MIT License
 
 ---
 
-**最后更新**: 2026-02-08
+**最后更新**: 2026-02-10

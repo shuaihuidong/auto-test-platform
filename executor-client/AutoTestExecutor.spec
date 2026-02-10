@@ -1,12 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+block_cipher = None
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=[
+        'PyQt6.QtCore',
+        'PyQt6.QtGui',
+        'PyQt6.QtWidgets',
+        'loguru',
+        'requests',
+        'pika',
+        'pika.adapters.blocking_connection',
+        'pika.connection',
+        'pika.channel',
+        'config',
+        'task_manager_v2',
+        'executor',
+        'message_queue_client',
+        'utils.system',
+        'gui.main_window',
+        'gui.config_wizard',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -14,6 +32,7 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -33,6 +52,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
 coll = COLLECT(
     exe,
     a.binaries,

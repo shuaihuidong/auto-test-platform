@@ -7,6 +7,19 @@
 """
 
 import sys
+import os
+
+# 添加当前目录到 Python 路径（用于 PyInstaller 打包后的模块导入）
+if getattr(sys, 'frozen', False):
+    # 运行打包后的 exe
+    application_path = os.path.dirname(sys.executable)
+else:
+    # 运行源代码
+    application_path = os.path.dirname(os.path.abspath(__file__))
+
+if application_path not in sys.path:
+    sys.path.insert(0, application_path)
+
 from loguru import logger
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QSettings

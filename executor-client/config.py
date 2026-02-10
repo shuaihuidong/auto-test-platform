@@ -39,7 +39,7 @@ class ExecutorConfig:
 
     # 日志配置
     log_retention_days: int = 7
-    log_level: str = "WARNING"  # 降低日志级别以减少输出
+    log_level: str = "INFO"  # 日志级别: DEBUG, INFO, WARNING, ERROR
     log_max_size_mb: int = 50
 
     # 心跳配置
