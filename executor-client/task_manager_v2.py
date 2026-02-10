@@ -42,8 +42,11 @@ class TaskManagerV2:
         self._stopped_executions_lock = threading.Lock()
         self._stopped_cache_max_size = 100
 
-        # 保存计划执行信息（用于GUI显示），任务完成后不删除
+        # 【修复】保存计划执行信息（用于GUI显示），保留历史记录
+        # 只保留最近 N 条记录，避免内存无限增长
         self.plan_executions: Dict[str, Dict[str, Any]] = {}  # parent_execution_id -> plan_info
+        self._plan_executions_lock = threading.Lock()
+        self._max_history_records = 50  # 最多保留 50 条历史记录
 
         # 心跳线程
         self._heartbeat_thread: Optional[threading.Thread] = None
@@ -649,14 +652,16 @@ class TaskManagerV2:
                 final_status = "failed"
                 final_message = "执行失败"
 
-            # 【修复】更新 plan_executions 中的脚本状态，并在全部完成后清理
+            # 【修复】更新 plan_executions 中的脚本状态，保留历史记录（到退出时才清空）
             if parent_execution_id and parent_execution_id in self.plan_executions:
-                if 0 <= script_index < len(self.plan_executions[parent_execution_id]["scripts"]):
-                    old_status = self.plan_executions[parent_execution_id]["scripts"][script_index]["status"]
-                    self.plan_executions[parent_execution_id]["scripts"][script_index]["status"] = final_status
-                    logger.info(f"任务完成后更新脚本状态: index={script_index}, {old_status} -> {final_status}")
+                with self._plan_executions_lock:
+                    if 0 <= script_index < len(self.plan_executions[parent_execution_id]["scripts"]):
+                        old_status = self.plan_executions[parent_execution_id]["scripts"][script_index]["status"]
+                        self.plan_executions[parent_execution_id]["scripts"][script_index]["status"] = final_status
+                        self.plan_executions[parent_execution_id]["scripts"][script_index]["completed_at"] = time.strftime("%H:%M:%S")
+                        logger.info(f"任务完成后更新脚本状态: index={script_index}, {old_status} -> {final_status}")
 
-                    # 【修复】检查是否所有脚本都已完成，如果是则清理 plan_executions
+                    # 检查是否所有脚本都已完成，如果是则添加计划完成时间
                     all_finished = True
                     for script_info in self.plan_executions[parent_execution_id]["scripts"]:
                         if script_info["status"] in ["waiting", "running"]:
@@ -664,8 +669,9 @@ class TaskManagerV2:
                             break
 
                     if all_finished:
-                        logger.info(f"父执行 {parent_execution_id} 所有脚本已完成，清理 plan_executions 缓存")
-                        del self.plan_executions[parent_execution_id]
+                        # 所有脚本完成，添加计划完成时间，保留历史记录
+                        self.plan_executions[parent_execution_id]["completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        logger.info(f"父执行 {parent_execution_id} 所有脚本已完成，保留历史记录（退出时清空）")
 
             # 【关键修复】检查并触发等待队列中的下一个任务
             if parent_execution_id:
@@ -1023,16 +1029,17 @@ class TaskManagerV2:
         for task_id in list(self.running_tasks.keys()):
             self.cancelled_tasks.add(task_id)
 
-        # 【修复】清理所有缓存，释放内存
+        # 清理所有缓存，包括历史记录
         self.running_tasks.clear()
         self.cancelled_tasks.clear()
         with self._stopped_executions_lock:
             self._stopped_executions_list.clear()
         with self._wait_lock:
             self._sequential_wait_queue.clear()
-        self.plan_executions.clear()
+        with self._plan_executions_lock:
+            self.plan_executions.clear()
 
-        logger.info("任务管理器已断开连接并清理缓存")
+        logger.info("任务管理器已断开连接并清空所有缓存和历史记录")
 
 
 # 单例
