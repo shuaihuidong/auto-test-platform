@@ -17,11 +17,11 @@ class ExecutionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Execution
-        fields = ['id', 'execution_type', 'execution_type_display', 'execution_mode', 'execution_mode_display',
+        fields = ['id', 'display_id', 'execution_type', 'execution_type_display', 'execution_mode', 'execution_mode_display',
                   'parent', 'plan', 'plan_name', 'script', 'script_name', 'status', 'status_display',
                   'result', 'duration', 'passed_count', 'failed_count', 'total_count',
                   'children_count', 'started_at', 'completed_at', 'created_by', 'created_by_name', 'created_at']
-        read_only_fields = ['id', 'started_at', 'completed_at', 'created_at']
+        read_only_fields = ['id', 'display_id', 'started_at', 'completed_at', 'created_at']
 
     def get_children_count(self, obj):
         return obj.children.count() if obj.execution_type == 'plan' else 0

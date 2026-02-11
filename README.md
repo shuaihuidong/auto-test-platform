@@ -2,14 +2,14 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 ![Django](https://img.shields.io/badge/Django-4.2.7-green)
 ![Vue](https://img.shields.io/badge/Vue-3.3.8-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
 一个基于 Vue3 + Django 的自动化测试管理平台，通过可视化拖拉拽方式创建和管理多类型测试脚本。
 
-**核心特性**: 消息队列架构 | 独立执行器 | 可视化脚本编辑 | 多框架支持
+**核心特性**: 消息队列架构 | 独立执行器 | 可视化脚本编辑 | 多框架支持 | RabbitMQ用户管理
 
 [功能特性](#功能特性) • [快速开始](#快速开始) • [使用说明](#使用说明) • [部署文档](#生产环境部署)
 
@@ -30,6 +30,7 @@
 | 🔌 **变量管理** | 项目级/脚本级变量，支持敏感数据加密 |
 | 📦 **独立执行器** | 独立的执行器客户端，支持远程部署，PyQt6 GUI |
 | 🔄 **消息队列架构** | RabbitMQ 实现任务分发，支持多执行机负载均衡 |
+| 🔐 **RabbitMQ用户管理** | 超级管理员可创建/管理执行机专用MQ账号，支持远程连接 |
 
 ## 技术栈
 
@@ -54,7 +55,7 @@
 
 | 角色 | 等级 | 权限说明 |
 |------|------|----------|
-| **超级管理员** (super_admin) | 4 | 全部权限 + 管理用户 + 系统设置 |
+| **超级管理员** (super_admin) | 4 | 全部权限 + 管理用户 + 系统设置 + **RabbitMQ用户管理** |
 | **管理员** (admin) | 3 | 查看、创建、更新、删除、执行测试 |
 | **测试人员** (tester) | 2 | 查看、创建脚本、执行测试 |
 | **访客** (guest) | 1 | 仅查看权限 |
@@ -70,11 +71,11 @@ auto-test-platform/
 │   │   ├── asgi.py             # ASGI配置 (WebSocket)
 │   │   └── wsgi.py             # WSGI配置
 │   ├── apps/                   # 应用模块
-│   │   ├── users/              # 用户管理 (权限分级、认证)
+│   │   ├── users/              # 用户管理 (权限分级、认证、RabbitMQ用户管理)
 │   │   │   ├── models.py       # User模型 (role字段)
 │   │   │   ├── permissions.py  # 权限控制
 │   │   │   ├── serializers.py  # 数据序列化
-│   │   │   └── views.py        # 视图逻辑
+│   │   │   └── views.py        # 视图逻辑 (含RabbitMQ用户管理API)
 │   │   ├── projects/           # 项目管理
 │   │   ├── scripts/            # 脚本管理 + 数据源管理
 │   │   │   ├── models.py       # Script, DataSource, ApiTestConfig
@@ -82,14 +83,13 @@ auto-test-platform/
 │   │   ├── plans/              # 计划管理
 │   │   ├── executions/         # 执行管理
 │   │   │   ├── consumers.py    # WebSocket消费者
-│   │   │   └── models.py       # Execution模型
+│   │   │   └── models.py       # Execution模型 (含display_id自增)
 │   │   ├── reports/            # 报告管理
 │   │   │   ├── generators.py   # 报告生成器
 │   │   │   └── models.py       # Report模型
 │   │   ├── drivers/            # 驱动管理
 │   │   ├── executors/          # 执行器管理 (分组/标签)
 │   │   │   ├── consumers.py    # WebSocket消费者
-│   │   │   ├── consumers_v2.py # 新版WebSocket (仅状态展示)
 │   │   │   ├── heartbeat.py    # HTTP心跳和注册API
 │   │   │   └── routing.py      # WebSocket路由
 │   │   └── scheduler/          # 调度器
@@ -133,7 +133,7 @@ auto-test-platform/
 │   │       ├── ExecutorManage.vue  # 执行器管理
 │   │       ├── VariableManage.vue  # 变量管理
 │   │       ├── UserManage.vue      # 用户管理
-│   │       ├── AccountRoleManage.vue # 账号角色
+│   │       ├── AccountRoleManage.vue # 账号角色管理 (含RabbitMQ用户管理)
 │   │       ├── DriverCenter.vue    # 驱动中心
 │   │       └── HelpCenter.vue      # 帮助中心
 │   ├── index.html              # 入口 HTML
@@ -188,6 +188,10 @@ auto-test-platform/
 │  │          TaskDistributor (任务分发服务)             │   │
 │  │    扫描待执行任务 → 选择可用执行机 → 发布到MQ       │   │
 │  └─────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │       RabbitMQ 用户管理 (仅超级管理员)              │   │
+│  │  创建用户  列表展示  删除用户  修改密码              │   │
+│  └─────────────────────────────────────────────────────┘   │
 └────────────────────┬────────────────────────────────────────┘
                      │ HTTP POST (发布任务)
                      ▼
@@ -238,23 +242,69 @@ auto-test-platform/
 2. 平台通过 channel_layer 广播执行机状态变化
 3. 前端实时接收状态更新并展示
 
+**RabbitMQ用户管理流程**:
+1. 超级管理员在「账号角色管理」页面创建RabbitMQ用户
+2. 平台通过RabbitMQ HTTP API创建用户并设置权限
+3. 用户名/密码提供给执行机用户用于配置
+4. 执行机使用专用账号连接RabbitMQ（支持远程）
+
 ## API 端点
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/auth/login/` | POST | 用户登录 |
-| `/api/auth/logout/` | POST | 用户登出 |
-| `/api/users/` | GET/POST | 用户列表/创建 |
-| `/api/projects/` | GET/POST | 项目列表/创建 |
-| `/api/scripts/` | GET/POST | 脚本列表/创建 |
-| `/api/plans/` | GET/POST | 测试计划列表/创建 |
-| `/api/executions/` | GET/POST | 执行记录列表/创建执行 |
-| `/api/executors/` | GET/POST | 执行机列表/注册 |
-| `/api/executor/register/` | POST | 执行机注册 |
-| `/api/executor/heartbeat/` | POST | 执行机心跳上报 |
-| `/api/reports/` | GET | 测试报告 |
-| `/api/drivers/` | GET | 驱动列表 |
-| `/ws/executor-status/` | WebSocket | 执行机状态监听 |
+### 认证相关
+
+| 端点 | 方法 | 说明 | 权限 |
+|------|------|------|------|
+| `/api/auth/login/` | POST | 用户登录 | 公开 |
+| `/api/auth/logout/` | POST | 用户登出 | 认证用户 |
+
+### 用户管理
+
+| 端点 | 方法 | 说明 | 权限 |
+|------|------|------|------|
+| `/api/users/` | GET/POST | 用户列表/创建 | 管理员+ |
+| `/api/users/{id}/` | PUT/DELETE | 更新/删除用户 | 管理员+ |
+| `/api/users/me/` | GET | 获取当前用户信息 | 认证用户 |
+| `/api/users/permissions/` | GET | 获取当前用户权限 | 认证用户 |
+| `/api/users/{id}/set_role/` | POST | 设置用户角色 | 超级管理员 |
+| `/api/users/{id}/reset_password/` | POST | 重置用户密码 | 管理员+ |
+| `/api/users/change_password/` | POST | 修改自己的密码 | 认证用户 |
+| `/api/users/role_list/` | GET | 获取角色列表 | 管理员+ |
+| `/api/users/role_users/{role}/` | GET | 获取指定角色的用户 | 管理员+ |
+
+### RabbitMQ用户管理（超级管理员专属）
+
+| 端点 | 方法 | 说明 | 权限 |
+|------|------|------|------|
+| `/api/users/create_rabbitmq_user/` | POST | 创建RabbitMQ用户 | 超级管理员 |
+| `/api/users/list_rabbitmq_users/` | GET | 列出RabbitMQ用户 | 超级管理员 |
+| `/api/users/delete_rabbitmq_user/` | POST/DELETE | 删除RabbitMQ用户 | 超级管理员 |
+| `/api/users/update_rabbitmq_user_password/` | POST | 修改RabbitMQ用户密码 | 超级管理员 |
+
+### 项目与脚本
+
+| 端点 | 方法 | 说明 | 权限 |
+|------|------|------|------|
+| `/api/projects/` | GET/POST | 项目列表/创建 | 测试人员+ |
+| `/api/scripts/` | GET/POST | 脚本列表/创建 | 测试人员+ |
+| `/api/scripts/{id}/` | PUT/DELETE | 更新/删除脚本 | 管理员+ |
+| `/api/plans/` | GET/POST | 测试计划列表/创建 | 测试人员+ |
+| `/api/executions/` | GET/POST | 执行记录列表/创建执行 | 测试人员+ |
+| `/api/executions/{id}/stop/` | POST | 停止执行 | 认证用户 |
+
+### 执行器管理
+
+| 端点 | 方法 | 说明 | 权限 |
+|------|------|------|------|
+| `/api/executor/register/` | POST | 执行机注册 | 公开 |
+| `/api/executor/heartbeat/` | POST | 执行机心跳上报 | 公开 |
+| `/ws/executor-status/` | WebSocket | 执行机状态监听 | 认证用户 |
+
+### 其他
+
+| 端点 | 方法 | 说明 | 权限 |
+|------|------|------|------|
+| `/api/reports/` | GET | 测试报告 | 认证用户 |
+| `/api/drivers/` | GET | 驱动列表 | 认证用户 |
 
 ## 快速开始
 
@@ -338,6 +388,10 @@ npm run dev
 
 ### 4. 执行器客户端启动
 
+#### 本地执行机（与服务端同电脑）
+
+如果执行机和服务器在同一台电脑上，可以使用默认的 `guest` 账号：
+
 ```bash
 cd executor-client
 
@@ -348,11 +402,36 @@ pip install -r requirements.txt
 python main.py
 ```
 
-首次运行会弹出配置向导，需要配置:
+配置向导中填写：
 - 服务器地址: `http://127.0.0.1:8000`
 - RabbitMQ地址: `127.0.0.1`
-- 用户名/密码: 平台登录凭据
-- 执行机名称: 自定义名称 (如 "测试执行机-01")
+- 用户名: `guest`
+- 密码: `guest`
+- 执行机名称: 自定义名称 (如 "本地执行机-01")
+
+#### 远程执行机（与服务端不同电脑）
+
+由于 RabbitMQ 的 `guest` 账号只允许本地连接，远程执行机需要使用专用的 RabbitMQ 用户：
+
+1. **创建 RabbitMQ 用户**：
+   - 登录平台（需超级管理员权限）
+   - 进入「账号角色管理」→「角色管理」标签页
+   - 在「RabbitMQ 用户管理」区域点击「创建 RabbitMQ 用户」
+   - 填写用户名（如 `executor-remote-01`）和密码
+   - 点击创建，系统会生成用户并显示凭证信息
+
+2. **配置远程执行机**：
+   ```bash
+   cd executor-client
+   python main.py
+   ```
+
+   配置向导中填写：
+   - 服务器地址: `http://[服务器IP]:8000`（填写实际IP）
+   - RabbitMQ地址: `[服务器IP]`（填写实际IP）
+   - 用户名: 刚创建的用户名（如 `executor-remote-01`）
+   - 密码: 创建时设置的密码
+   - 执行机名称: 自定义名称
 
 ### 5. 验证安装
 
@@ -371,6 +450,28 @@ python main.py
 | guest1 | guest123 | 访客 |
 
 ## 使用说明
+
+### RabbitMQ用户管理（超级管理员专属）
+
+当执行机部署在远程服务器时，需要使用专用的RabbitMQ用户账号进行连接。
+
+**创建用户**：
+1. 使用超级管理员账号登录平台
+2. 进入「账号角色管理」页面
+3. 切换到「角色管理」标签页
+4. 在「RabbitMQ 用户管理」区域点击「创建 RabbitMQ 用户」
+5. 填写用户名和密码，选择标签（management用于访问管理插件）
+6. 创建成功后，将凭证信息提供给执行机用户
+
+**管理用户**：
+- **查看列表**：进入「角色管理」标签页自动加载，或点击「刷新」按钮
+- **删除用户**：点击用户行的「删除」按钮
+- **修改密码**：点击用户行的「改密」按钮
+
+**重要说明**：
+- `guest` 账号只能用于本地连接（localhost）
+- 远程执行机必须使用专用的RabbitMQ用户
+- 创建的用户默认拥有完整权限（configure/write/read 为 `.*`）
 
 ### 创建测试脚本流程
 
@@ -568,6 +669,7 @@ server {
 - [ ] 收集静态文件
 - [ ] 配置 Nginx 反向代理
 - [ ] 配置 HTTPS (推荐)
+- [ ] 创建远程执行机专用的RabbitMQ用户
 
 > 详细部署说明请参考 [DEPLOYMENT.md](./DEPLOYMENT.md)
 
@@ -591,6 +693,11 @@ server {
 - 执行趋势、耗时分布、失败分析
 - HTML 报告导出
 
+### RabbitMQ用户管理（超级管理员专属）
+- 紫色渐变卡片界面
+- 创建/删除/修改密码
+- 支持远程执行机连接
+
 ## 故障排查
 
 ### RabbitMQ 相关问题
@@ -612,7 +719,20 @@ rabbitmq-service start  # Windows
 sudo systemctl start rabbitmq-server  # Linux
 ```
 
-#### 2. 队列未创建
+#### 2. 远程执行机无法连接RabbitMQ
+
+**症状**: 远程执行机提示 "AMQPConnectionError" 或认证失败
+
+**原因**: RabbitMQ 的 `guest` 账号默认只允许本地连接
+
+**解决方案**:
+1. 使用超级管理员账号登录平台
+2. 进入「账号角色管理」→「角色管理」
+3. 在「RabbitMQ 用户管理」区域创建专用用户
+4. 将用户名和密码提供给执行机用户
+5. 执行机配置向导中使用专用账号连接
+
+#### 3. 队列未创建
 
 **症状**: 执行机连接后，RabbitMQ管理界面看不到对应队列
 
@@ -621,7 +741,7 @@ sudo systemctl start rabbitmq-server  # Linux
 - 查看执行机配置文件 `~/.executor/config.json`
 - 确认 RabbitMQ 地址、端口、用户名密码配置正确
 
-#### 3. 消息堆积
+#### 4. 消息堆积
 
 **症状**: 队列中消息数量持续增长
 
@@ -751,9 +871,10 @@ curl -X POST http://localhost:8000/api/executor/heartbeat/ \
 | 错误 | 原因 | 解决方案 |
 |------|------|----------|
 | `AMQPConnectionError` | RabbitMQ 未启动 | 启动 RabbitMQ 服务 |
-| `AuthenticationError` | RabbitMQ 认证失败 | 检查用户名密码 |
+| `AuthenticationError` | RabbitMQ 认证失败 | 检查用户名密码，远程连接需使用专用账号 |
 | `NotFound: /ws/` | WebSocket 路由未找到 | 使用 daphne 启动 |
 | `401 Unauthorized` | API 认证失败 | 检查登录状态 |
+| `403 Forbidden` | 权限不足 | 检查用户角色权限 |
 | `500 Internal Error` | 服务器错误 | 查看后端日志 |
 
 ## 更多文档
@@ -799,7 +920,7 @@ curl -X POST http://localhost:8000/api/executor/heartbeat/ \
 
 ## 路线图
 
-### v1.1 (计划中)
+### v1.2 (计划中)
 - [ ] 支持更多测试框架 (Cypress, Robot Framework)
 - [ ] CI/CD 集成 (Jenkins, GitLab CI)
 - [ ] 测试数据自动生成
@@ -832,4 +953,4 @@ MIT License
 
 ---
 
-**最后更新**: 2026-02-10
+**最后更新**: 2026-02-11

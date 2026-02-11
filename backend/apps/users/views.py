@@ -128,6 +128,36 @@ class UserViewSet(viewsets.ModelViewSet):
             'user': UserSerializer(user).data
         })
 
+    @action(detail=True, methods=['post'])
+    def reset_password(self, request, pk=None):
+        """重置用户密码 - 仅管理员"""
+        # 检查权限
+        if request.user.role not in ['admin', 'super_admin']:
+            return Response(
+                {'error': '只有管理员可以重置用户密码'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        user = self.get_object()
+
+        # 不能重置自己的密码
+        if user.id == request.user.id:
+            return Response(
+                {'error': '不能重置自己的密码，请使用修改密码功能'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 重置为默认密码
+        default_password = '123456'
+        user.set_password(default_password)
+        user.save()
+
+        return Response({
+            'message': f'用户 {user.username} 的密码已重置为默认密码',
+            'default_password': default_password,
+            'user': UserSerializer(user).data
+        })
+
     @action(detail=False, methods=['post'])
     def change_password(self, request):
         """修改密码 - 所有登录用户"""
@@ -147,6 +177,244 @@ class UserViewSet(viewsets.ModelViewSet):
         user.set_password(new_password)
         user.save()
         return Response({'message': '密码修改成功'}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def create_rabbitmq_user(self, request):
+        """创建 RabbitMQ 用户 - 仅超级管理员"""
+        # 检查权限：只有超级管理员可以创建 RabbitMQ 用户
+        if request.user.role != 'super_admin':
+            return Response(
+                {'error': '只有超级管理员可以创建 RabbitMQ 用户'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        username = request.data.get('username')
+        password = request.data.get('password')
+        tags = request.data.get('tags', 'management')
+
+        if not username or not password:
+            return Response(
+                {'error': '用户名和密码不能为空'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            import requests
+            from django.conf import settings
+
+            # 使用 RabbitMQ HTTP API 创建用户
+            rabbitmq_api_url = f"http://{settings.RABBITMQ_HOST}:15672/api/users/{username}"
+            auth = (settings.RABBITMQ_USER, settings.RABBITMQ_PASSWORD)
+
+            # 创建用户
+            response = requests.put(
+                rabbitmq_api_url,
+                json={
+                    "password": password,
+                    "tags": tags
+                },
+                auth=auth
+            )
+
+            if response.status_code in [200, 201]:
+                # 设置用户权限（对虚拟主机 / 的完全权限）
+                permissions_url = f"http://{settings.RABBITMQ_HOST}:15672/api/permissions/%2F/{username}"
+                permissions_response = requests.put(
+                    permissions_url,
+                    json={
+                        "configure": ".*",
+                        "write": ".*",
+                        "read": ".*"
+                    },
+                    auth=auth
+                )
+
+                if permissions_response.status_code in [200, 201]:
+                    return Response({
+                        'message': f'RabbitMQ 用户 {username} 创建成功',
+                        'username': username,
+                        'password': password,
+                        'tags': tags,
+                        'note': '请将该信息提供给执行机用户，用于配置执行机客户端'
+                    }, status=status.HTTP_201_CREATED)
+                else:
+                    return Response(
+                        {'error': f'用户创建成功但设置权限失败: {permissions_response.text}'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+            else:
+                return Response(
+                    {'error': f'创建用户失败: {response.text}'},
+                    status=response.status_code
+                )
+
+        except requests.exceptions.ConnectionError:
+            return Response(
+                {'error': '无法连接到 RabbitMQ 管理接口，请确认 RabbitMQ 服务已启动'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'创建用户时发生错误: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'])
+    def list_rabbitmq_users(self, request):
+        """列出 RabbitMQ 用户 - 仅超级管理员"""
+        if request.user.role != 'super_admin':
+            return Response(
+                {'error': '只有超级管理员可以查看 RabbitMQ 用户'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            import requests
+            from django.conf import settings
+
+            # 获取用户列表
+            users_url = f"http://{settings.RABBITMQ_HOST}:15672/api/users/"
+            auth = (settings.RABBITMQ_USER, settings.RABBITMQ_PASSWORD)
+
+            response = requests.get(users_url, auth=auth)
+
+            if response.status_code == 200:
+                users_data = response.json()
+                # 过滤掉系统内置用户（guest 通常在系统中有特殊用途）
+                users_list = []
+                for user_info in users_data:
+                    # 跳过 guest 用户（系统默认，只允许本地访问）
+                    if user_info.get('name') != 'guest':
+                        users_list.append({
+                            'name': user_info.get('name'),
+                            'tags': user_info.get('tags', ''),
+                            'hashing_algorithm': user_info.get('hashing_algorithm', ''),
+                        })
+                return Response({'users': users_list})
+            else:
+                return Response(
+                    {'error': f'获取用户列表失败: {response.text}'},
+                    status=response.status_code
+                )
+
+        except requests.exceptions.ConnectionError:
+            return Response(
+                {'error': '无法连接到 RabbitMQ 管理接口'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'获取用户列表时发生错误: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post', 'delete'])
+    def delete_rabbitmq_user(self, request):
+        """删除 RabbitMQ 用户 - 仅超级管理员"""
+        if request.user.role != 'super_admin':
+            return Response(
+                {'error': '只有超级管理员可以删除 RabbitMQ 用户'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        username = request.data.get('username') if request.method == 'POST' else request.query_params.get('username')
+
+        if not username:
+            return Response(
+                {'error': '请提供要删除的用户名'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 不允许删除 guest 用户
+        if username == 'guest':
+            return Response(
+                {'error': '不能删除 guest 系统用户'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            import requests
+            from django.conf import settings
+
+            # 删除用户
+            user_url = f"http://{settings.RABBITMQ_HOST}:15672/api/users/{username}"
+            auth = (settings.RABBITMQ_USER, settings.RABBITMQ_PASSWORD)
+
+            response = requests.delete(user_url, auth=auth)
+
+            if response.status_code in [200, 204]:
+                return Response({'message': f'RabbitMQ 用户 {username} 已删除'})
+            else:
+                return Response(
+                    {'error': f'删除用户失败: {response.text}'},
+                    status=response.status_code
+                )
+
+        except requests.exceptions.ConnectionError:
+            return Response(
+                {'error': '无法连接到 RabbitMQ 管理接口'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'删除用户时发生错误: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post'])
+    def update_rabbitmq_user_password(self, request):
+        """修改 RabbitMQ 用户密码 - 仅超级管理员"""
+        if request.user.role != 'super_admin':
+            return Response(
+                {'error': '只有超级管理员可以修改 RabbitMQ 用户密码'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        username = request.data.get('username')
+        new_password = request.data.get('password')
+
+        if not username or not new_password:
+            return Response(
+                {'error': '用户名和新密码不能为空'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            import requests
+            from django.conf import settings
+
+            # 修改用户密码
+            user_url = f"http://{settings.RABBITMQ_HOST}:15672/api/users/{username}"
+            auth = (settings.RABBITMQ_USER, settings.RABBITMQ_PASSWORD)
+
+            response = requests.put(
+                user_url,
+                json={"password": new_password},
+                auth=auth
+            )
+
+            if response.status_code in [200, 201]:
+                return Response({
+                    'message': f'RabbitMQ 用户 {username} 密码已修改',
+                    'username': username,
+                    'password': new_password
+                })
+            else:
+                return Response(
+                    {'error': f'修改密码失败: {response.text}'},
+                    status=response.status_code
+                )
+
+        except requests.exceptions.ConnectionError:
+            return Response(
+                {'error': '无法连接到 RabbitMQ 管理接口'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'修改密码时发生错误: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 @api_view(['GET'])

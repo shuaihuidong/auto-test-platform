@@ -37,6 +37,10 @@ export async function setUserRole(id: number, role: string): Promise<{ message: 
   return post(`/users/${id}/set_role/`, { role })
 }
 
+export async function resetUserPassword(id: number): Promise<{ message: string; default_password: string; user: User }> {
+  return post(`/users/${id}/reset_password/`)
+}
+
 export async function changePassword(oldPassword: string, newPassword: string): Promise<{ message: string }> {
   return post('/users/change_password/', { old_password: oldPassword, new_password: newPassword })
 }
@@ -52,5 +56,6 @@ export const userApi = {
   update: updateUser,
   delete: deleteUser,
   setRole: setUserRole,
+  resetPassword: resetUserPassword,
   changePassword
 }

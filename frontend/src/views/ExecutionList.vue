@@ -59,11 +59,10 @@
                 </div>
               </template>
               <template v-else-if="column.key === 'status'">
-                <a-badge :status="getStatusBadge(record.status)" :text="record.status_display" />
+                <a-badge :status="getStatusBadge(record.status)" :text="getStatusText(record)" />
               </template>
               <template v-else-if="column.key === 'result'">
                 <a-space>
-                  <span>总脚本数: {{ record.total_count }}</span>
                   <span style="color: #52c41a;">已完成: {{ record.passed_count }}</span>
                   <span style="color: #f5222d;">失败: {{ record.failed_count }}</span>
                 </a-space>
@@ -140,7 +139,7 @@
                 </div>
               </template>
               <template v-else-if="column.key === 'status'">
-                <a-badge :status="getStatusBadge(record.status)" :text="record.status_display" />
+                <a-badge :status="getStatusBadge(record.status)" :text="getStatusText(record)" />
               </template>
               <template v-else-if="column.key === 'result'">
                 <a-space>
@@ -264,7 +263,7 @@ const scriptCurrentFilters = ref({
 
 // 计划执行记录列定义
 const planColumns = [
-  { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
+  { title: 'ID', key: 'display_id', dataIndex: 'display_id', width: 150 },
   { title: '计划名称', key: 'name', width: 250 },
   { title: '状态', key: 'status', width: 120 },
   { title: '结果', key: 'result', width: 250 },
@@ -276,7 +275,7 @@ const planColumns = [
 
 // 脚本执行记录列定义
 const scriptColumns = [
-  { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
+  { title: 'ID', key: 'display_id', dataIndex: 'display_id', width: 150 },
   { title: '脚本名称', key: 'name', width: 250 },
   { title: '状态', key: 'status', width: 120 },
   { title: '结果', key: 'result', width: 250 },
@@ -475,6 +474,20 @@ function getStatusBadge(status: string) {
     stopped: 'warning'
   }
   return badges[status] || 'default'
+}
+
+// 获取状态显示文本（计划执行和脚本执行区分显示）
+function getStatusText(record: any): string {
+  if (record.execution_type === 'plan') {
+    // 计划执行：completed 和 failed 都显示为"已完成"
+    if (record.status === 'completed' || record.status === 'failed') {
+      return '已完成'
+    }
+    return record.status_display || record.status
+  } else {
+    // 脚本执行保持原样
+    return record.status_display || record.status
+  }
 }
 
 // 格式化日期时间

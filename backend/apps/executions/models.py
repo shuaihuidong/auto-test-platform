@@ -1,5 +1,8 @@
 from django.db import models
 from django.conf import settings
+from django.db import transaction
+from datetime import datetime
+import time
 
 
 class Execution(models.Model):
@@ -87,6 +90,7 @@ class Execution(models.Model):
         verbose_name='执行者'
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    display_id = models.CharField(max_length=20, unique=True, null=True, blank=True, verbose_name='显示ID')
 
     class Meta:
         db_table = 'executions_execution'
@@ -127,3 +131,56 @@ class Execution(models.Model):
             # 计划执行：返回脚本总数
             return self.children.count()
         return self.result.get('total', 0) if self.result else 0
+
+    def save(self, *args, **kwargs):
+        # 生成 display_id（仅在新建时）
+        if not self.display_id:
+            self.display_id = self._generate_display_id()
+        super().save(*args, **kwargs)
+
+    def _generate_display_id(self):
+        """
+        生成显示ID：日期 + 序号
+        格式：YYYYMMDD + 3位序号（纯数字，共11位）
+        例如：20260211001
+        """
+        max_retries = 10
+        for attempt in range(max_retries):
+            try:
+                with transaction.atomic():
+                    # 获取当前日期
+                    now = datetime.now()
+                    date_prefix = now.strftime('%Y%m%d')  # 8位
+
+                    # 使用 select_for_update 锁定查询，防止并发冲突
+                    max_display_id = Execution.objects.filter(
+                        display_id__startswith=date_prefix,
+                        execution_type=self.execution_type
+                    ).select_for_update().order_by('-display_id').values_list('display_id', flat=True).first()
+
+                    if max_display_id:
+                        # 提取最后3位序号并递增
+                        last_seq = int(max_display_id[-3:])
+                        new_seq = last_seq + 1
+                    else:
+                        new_seq = 1
+
+                    # 拼接：日期前缀(8位) + 3位序号（纯数字，共11位）
+                    new_display_id = f"{date_prefix}{new_seq:03d}"
+
+                    # 验证 ID 是否已存在（双重检查）
+                    if Execution.objects.filter(display_id=new_display_id).exists():
+                        # 如果已存在，继续下一轮重试
+                        continue
+
+                    return new_display_id
+            except Exception:
+                # 如果发生任何错误，重试
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(0.01)
+                continue
+
+        # 如果重试次数用完，使用时间戳确保唯一性
+        now = datetime.now()
+        return f"{now.strftime('%Y%m%d%H%M%S')}"

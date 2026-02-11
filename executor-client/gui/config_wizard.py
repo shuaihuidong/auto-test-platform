@@ -84,6 +84,98 @@ class ServerConfigPage(QWizardPage):
         return True
 
 
+class RabbitMQConfigPage(QWizardPage):
+    """第2页：RabbitMQ 配置"""
+
+    def __init__(self, config: ExecutorConfig):
+        super().__init__()
+        self.config = config
+        self.setTitle("RabbitMQ 配置")
+        self.setSubTitle("配置消息队列服务器地址")
+
+        layout = QFormLayout()
+
+        # RabbitMQ 主机地址
+        self.rabbitmq_host_input = QLineEdit()
+        self.rabbitmq_host_input.setText(config.rabbitmq_host)
+        self.rabbitmq_host_input.setPlaceholderText("127.0.0.1（本机） 或 192.168.1.100（服务器IP）")
+        self.rabbitmq_host_input.textChanged.connect(self.completeChanged)
+        self.registerField("rabbitmq_host", self.rabbitmq_host_input)
+        layout.addRow("RabbitMQ 地址*:", self.rabbitmq_host_input)
+
+        # RabbitMQ 端口
+        self.rabbitmq_port_input = QLineEdit()
+        self.rabbitmq_port_input.setText(str(config.rabbitmq_port))
+        self.rabbitmq_port_input.setPlaceholderText("5672")
+        self.rabbitmq_port_input.textChanged.connect(self.completeChanged)
+        self.registerField("rabbitmq_port", self.rabbitmq_port_input)
+        layout.addRow("端口*:", self.rabbitmq_port_input)
+
+        # 用户名
+        self.rabbitmq_user_input = QLineEdit()
+        self.rabbitmq_user_input.setText(config.rabbitmq_user)
+        self.rabbitmq_user_input.setPlaceholderText("guest")
+        self.rabbitmq_user_input.textChanged.connect(self.completeChanged)
+        self.registerField("rabbitmq_user", self.rabbitmq_user_input)
+        layout.addRow("用户名:", self.rabbitmq_user_input)
+
+        # 密码
+        self.rabbitmq_password_input = QLineEdit()
+        self.rabbitmq_password_input.setText(config.rabbitmq_password)
+        self.rabbitmq_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.rabbitmq_password_input.setPlaceholderText("guest")
+        self.rabbitmq_password_input.textChanged.connect(self.completeChanged)
+        self.registerField("rabbitmq_password", self.rabbitmq_password_input)
+        layout.addRow("密码:", self.rabbitmq_password_input)
+
+        # 说明文字
+        help_label = QLabel(
+            "\n提示：\n"
+            "• 如果执行机和服务器在同一台电脑，使用默认值 127.0.0.1\n"
+            "• 如果执行机和服务器在不同电脑，填写服务器的实际 IP 地址\n"
+            "• RabbitMQ 运行在服务器上，执行机通过网络连接\n"
+            "• 确保服务器防火墙允许访问 5672 端口"
+        )
+        help_label.setWordWrap(True)
+        help_label.setStyleSheet("color: #666; font-size: 12px;")
+        layout.addRow(help_label)
+
+        self.setLayout(layout)
+
+    def isComplete(self) -> bool:
+        """检查页面是否完成"""
+        host = self.rabbitmq_host_input.text().strip()
+        port = self.rabbitmq_port_input.text().strip()
+        return bool(host and port)
+
+    def validatePage(self) -> bool:
+        """验证页面"""
+        host = self.rabbitmq_host_input.text().strip()
+        port = self.rabbitmq_port_input.text().strip()
+        user = self.rabbitmq_user_input.text().strip()
+        password = self.rabbitmq_password_input.text().strip()
+
+        if not host or not port:
+            QMessageBox.warning(self, "验证失败", "请填写 RabbitMQ 地址和端口")
+            return False
+
+        # 验证端口
+        try:
+            port_num = int(port)
+            if port_num < 1 or port_num > 65535:
+                QMessageBox.warning(self, "验证失败", "端口必须在 1-65535 之间")
+                return False
+        except ValueError:
+            QMessageBox.warning(self, "验证失败", "端口必须是数字")
+            return False
+
+        self.config.rabbitmq_host = host
+        self.config.rabbitmq_port = port_num
+        self.config.rabbitmq_user = user or "guest"
+        self.config.rabbitmq_password = password or "guest"
+        return True
+
+
 class ExecutorInfoPage(QWizardPage):
     """第2页：执行机信息"""
 
@@ -449,6 +541,7 @@ class ConfigWizard(QWizard):
 
         # 添加页面
         self.addPage(ServerConfigPage(config))
+        self.addPage(RabbitMQConfigPage(config))
         self.addPage(ExecutorInfoPage(config))
         self.addPage(BrowserSelectPage(config))
         self.addPage(BrowserConfigPage(config))

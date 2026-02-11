@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+from datetime import datetime
 from .models import Execution
 from .serializers import ExecutionSerializer, ExecutionCreateSerializer
 import time
@@ -107,16 +108,19 @@ class ExecutionViewSet(viewsets.ModelViewSet):
                 })
 
             # 第一阶段：创建所有子执行记录（不创建 TaskQueue）
+            # 不预先生成 display_id，让 save() 方法自动生成（已有重试和锁机制）
             for index, script in enumerate(scripts_list):
-                # 创建子执行记录
-                child_execution = Execution.objects.create(
+                # 创建子执行记录，display_id 会在 save() 时自动生成
+                child_execution = Execution(
                     execution_type='script',
                     parent=parent_execution,
                     plan_id=plan_id,
                     script_id=script.id,
                     status='pending',
                     created_by=request.user
+                    # 注意：不设置 display_id，让 save() 方法自动生成
                 )
+                child_execution.save()
                 child_executions.append(child_execution)
 
             # 第二阶段：为每个子执行创建任务

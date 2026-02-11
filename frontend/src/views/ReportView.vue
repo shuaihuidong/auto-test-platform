@@ -61,50 +61,38 @@
             </a-card>
           </a-col>
           <a-col :span="12">
-            <a-card title="问题分析与建议" :body-style="{ height: '350px', padding: '16px' }">
-              <!-- 失败原因分析 -->
-              <div class="failure-analysis" v-if="getFailureReasons().length > 0">
-                <div v-for="(reason, index) in getFailureReasons()" :key="index" class="failure-reason-group">
-                  <!-- 失败原因标题 -->
-                  <div class="failure-reason-header">
-                    <ExperimentOutlined style="margin-right: 6px; color: #1890ff;" />
-                    <span class="reason-name">{{ reason.name }}</span>
-                    <span class="reason-count">{{ reason.count }} 次</span>
+            <a-card title="问题分析与建议" :body-style="{ height: '350px', padding: '16px', overflow: 'auto' }">
+              <div class="plan-failure-analysis">
+                <!-- 失败原因标签 -->
+                <div v-if="getFailureReasons().length > 0" class="analysis-section">
+                  <div class="section-title">
+                    <ExperimentOutlined style="margin-right: 6px; color: #1890ff; font-size: 14px;" />
+                    <span>失败原因</span>
                   </div>
-
-                  <!-- 错误示例 -->
-                  <div v-if="reason.examples && reason.examples.length > 0" class="error-examples">
-                    <div v-for="(example, idx) in reason.examples" :key="idx" class="error-example">
-                      {{ example }}{{ example.length >= 80 ? '...' : '' }}
-                    </div>
+                  <div class="failure-reason-tags">
+                    <a-tag v-for="(reason, index) in getFailureReasons()" :key="index" color="error">
+                      {{ reason.name }} ({{ reason.count }})
+                    </a-tag>
                   </div>
+                </div>
 
-                  <!-- 失败的脚本列表（前3个） -->
-                  <div v-if="reason.scripts && reason.scripts.length > 0" class="failed-scripts">
-                    <div v-for="(script, idx) in reason.scripts.slice(0, 3)" :key="script.id" class="failed-script-item">
-                      <span class="script-name">{{ script.name }}</span>
-                    </div>
-                    <div v-if="reason.scripts.length > 3" class="more-scripts">
-                      还有 {{ reason.scripts.length - 3 }} 个脚本...
-                    </div>
+                <!-- 改进建议 - 从失败原因中汇总 -->
+                <div v-if="getPlanSuggestions().length > 0" class="analysis-section">
+                  <div class="section-title">
+                    <BulbOutlined style="color: #faad14; margin-right: 6px; font-size: 14px;" />
+                    <span>改进建议</span>
                   </div>
-
-                  <!-- 改进建议 -->
-                  <div v-if="reason.suggestions && reason.suggestions.length > 0" class="reason-suggestions">
-                    <div class="suggestion-icon">💡</div>
-                    <div class="suggestion-list">
-                      <div v-for="(suggestion, idx) in reason.suggestions.slice(0, 2)" :key="idx" class="suggestion-text">
-                        {{ suggestion }}
-                      </div>
+                  <div class="suggestion-list">
+                    <div v-for="(suggestion, index) in getPlanSuggestions()" :key="index" class="suggestion-item">
+                      <span class="suggestion-bullet">•</span>
+                      <span class="suggestion-text">{{ suggestion }}</span>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <!-- 无失败 -->
-              <div v-else class="no-failure">
-                <div class="no-failure-content">
-                  <CheckCircleOutlined style="font-size: 48px; color: #52c41a; margin-bottom: 8px;" />
+                <!-- 无失败时的展示 -->
+                <div v-if="getFailureReasons().length === 0 && getPlanSuggestions().length === 0" class="no-failure-state">
+                  <CheckCircleOutlined style="font-size: 40px; color: #52c41a; margin-bottom: 8px;" />
                   <div class="no-failure-text">测试全部通过</div>
                   <div class="no-failure-sub">所有脚本均执行成功</div>
                 </div>
@@ -197,36 +185,40 @@
             </a-card>
           </a-col>
           <a-col :span="12">
-            <a-card title="问题分析与建议" :body-style="{ height: '350px', padding: '20px' }">
-              <!-- 失败原因分析 -->
-              <div class="failure-analysis">
-                <div class="analysis-title">
-                  <ExperimentOutlined style="margin-right: 6px; color: #1890ff;" />
-                  失败步骤分析
-                </div>
-                <div v-if="getStepFailureReasons().length > 0" class="failure-reasons">
-                  <div v-for="(reason, index) in getStepFailureReasons()" :key="index" class="failure-reason-item">
-                    <span class="reason-name">{{ reason.name }}</span>
-                    <span class="reason-count">{{ reason.count }} 次</span>
+            <a-card title="问题分析与建议" :body-style="{ height: '350px', padding: '16px', overflow: 'auto' }">
+              <div class="script-failure-analysis">
+                <!-- 失败原因标签 -->
+                <div v-if="getStepFailureReasons().length > 0" class="analysis-section">
+                  <div class="section-title">
+                    <ExperimentOutlined style="margin-right: 6px; color: #1890ff; font-size: 14px;" />
+                    <span>失败原因</span>
+                  </div>
+                  <div class="failure-reason-tags">
+                    <a-tag v-for="(reason, index) in getStepFailureReasons()" :key="index" color="error">
+                      {{ reason.name }} ({{ reason.count }})
+                    </a-tag>
                   </div>
                 </div>
-                <div v-else class="no-failure">
-                  <div class="no-failure-content">
-                    <CheckCircleOutlined style="font-size: 48px; color: #52c41a; margin-bottom: 8px;" />
-                    <div class="no-failure-text">暂无失败</div>
-                    <div class="no-failure-sub">所有步骤均通过</div>
-                  </div>
-                </div>
-              </div>
 
-              <!-- 改进建议 -->
-              <div v-if="getStepSuggestions().length > 0" class="suggestions">
-                <div class="suggestions-title">
-                  <BulbOutlined style="color: #faad14; margin-right: 6px;" />
-                  改进建议
+                <!-- 改进建议 -->
+                <div v-if="getStepSuggestions().length > 0" class="analysis-section">
+                  <div class="section-title">
+                    <BulbOutlined style="color: #faad14; margin-right: 6px; font-size: 14px;" />
+                    <span>改进建议</span>
+                  </div>
+                  <div class="suggestion-list">
+                    <div v-for="(suggestion, index) in getStepSuggestions()" :key="index" class="suggestion-item">
+                      <span class="suggestion-bullet">•</span>
+                      <span class="suggestion-text">{{ suggestion }}</span>
+                    </div>
+                  </div>
                 </div>
-                <div v-for="(suggestion, index) in getStepSuggestions()" :key="index" class="suggestion-item">
-                  {{ suggestion }}
+
+                <!-- 无失败时的展示 -->
+                <div v-if="getStepFailureReasons().length === 0 && getStepSuggestions().length === 0" class="no-failure-state">
+                  <CheckCircleOutlined style="font-size: 40px; color: #52c41a; margin-bottom: 8px;" />
+                  <div class="no-failure-text">全部通过</div>
+                  <div class="no-failure-sub">所有步骤执行成功</div>
                 </div>
               </div>
             </a-card>
@@ -882,6 +874,30 @@ function getStepSuggestions() {
   return Array.from(new Set(suggestions)).slice(0, 4)
 }
 
+// 获取计划执行改进建议
+function getPlanSuggestions() {
+  if (!report.value) return []
+
+  const failureReasons = getFailureReasons()
+  const suggestions: string[] = []
+
+  // 从失败原因中提取建议
+  failureReasons.forEach(reason => {
+    if (reason.suggestions && Array.isArray(reason.suggestions)) {
+      suggestions.push(...reason.suggestions)
+    }
+  })
+
+  // 如果没有失败原因，提供通用建议
+  if (failureReasons.length === 0) {
+    suggestions.push('定期维护测试用例，保持测试数据更新')
+    suggestions.push('优化等待策略，提高脚本稳定性')
+  }
+
+  // 去重并限制数量
+  return Array.from(new Set(suggestions)).slice(0, 4)
+}
+
 // 获取未执行的步骤数
 function getRemainingStepsCount() {
   if (!report.value || !report.value.charts_data?.trend) return 0
@@ -1081,5 +1097,92 @@ onMounted(() => {
 
 .suggestion-item:last-child {
   margin-bottom: 0;
+}
+
+/* 脚本执行记录 - 问题分析与建议优化样式 */
+.script-failure-analysis {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.analysis-section {
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.85);
+  margin-bottom: 10px;
+}
+
+.failure-reason-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.suggestion-list .suggestion-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.75);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.suggestion-bullet {
+  color: #faad14;
+  flex-shrink: 0;
+}
+
+.suggestion-list .suggestion-text {
+  flex: 1;
+  word-break: break-word;
+}
+
+.no-failure-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px 0;
+}
+
+.no-failure-state .no-failure-text {
+  font-size: 15px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.85);
+  margin-top: 8px;
+}
+
+.no-failure-state .no-failure-sub {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-top: 4px;
+}
+
+/* 计划执行报告 - 问题分析与建议优化样式 */
+.plan-failure-analysis {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 </style>

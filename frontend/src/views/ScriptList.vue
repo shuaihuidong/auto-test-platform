@@ -71,32 +71,37 @@
       @ok="confirmRunScript"
       @cancel="cancelRunScript"
     >
-      <a-alert
-        message="提示"
-        description="如果不选择执行机，系统会自动分配可用的在线执行机。"
-        type="info"
-        show-icon
-        style="margin-bottom: 16px"
-      />
-      <a-radio-group v-model:value="selectedExecutorId" style="width: 100%">
-        <a-list :data-source="availableExecutors" :loading="loadingExecutors">
-          <template #renderItem="{ item }">
-            <a-list-item>
-              <a-radio :value="item.id">
-                <span>{{ item.name }}</span>
-                <a-tag v-if="item.is_online" color="green">在线</a-tag>
-                <a-tag v-else color="red">离线</a-tag>
-                <span style="margin-left: 8px; color: #999">
-                  {{ item.current_tasks }}/{{ item.max_concurrent }} 任务
+      <a-form :label-col="{ span: 5 }" :wrapper-col="{ span: 19 }">
+        <a-form-item label="执行机">
+          <a-select
+            v-model:value="selectedExecutorId"
+            placeholder="自动分配可用执行机"
+            allow-clear
+            :loading="loadingExecutors"
+            show-search
+            :filter-option="filterExecutorOption"
+          >
+            <a-select-option v-for="executor in availableExecutors" :key="executor.id" :value="executor.id">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>{{ executor.name }}</span>
+                <span>
+                  <a-tag v-if="executor.is_online" color="green" size="small">在线</a-tag>
+                  <a-tag v-else color="red" size="small">离线</a-tag>
+                  <span style="color: #999; font-size: 12px;">
+                    {{ executor.current_tasks }}/{{ executor.max_concurrent }}
+                  </span>
                 </span>
-              </a-radio>
-            </a-list-item>
+              </div>
+            </a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item>
+          <template #label>
+            <span style="color: #999;">提示</span>
           </template>
-        </a-list>
-      </a-radio-group>
-      <a-radio :value="null" style="margin-top: 16px; display: block">
-        自动分配
-      </a-radio>
+          <span style="color: #666;">不选择则系统自动分配可用的在线执行机</span>
+        </a-form-item>
+      </a-form>
     </a-modal>
   </div>
 </template>
@@ -282,6 +287,12 @@ function getFrameworkLabel(framework: string) {
 
 function formatDate(date: string) {
   return dayjs(date).format('YYYY-MM-DD HH:mm')
+}
+
+function filterExecutorOption(input: string, option: any): boolean {
+  if (!option || !option.children) return false
+  const text = String(option.children[0]?.children || '').toLowerCase()
+  return text.includes(input.toLowerCase())
 }
 
 onMounted(() => {

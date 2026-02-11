@@ -56,6 +56,9 @@
                     <a-button size="small" @click="showChangeRole(record)" v-if="canChangeRole">
                       <UserSwitchOutlined /> 角色
                     </a-button>
+                    <a-button size="small" @click="showResetPassword(record)" v-if="canResetPassword">
+                      <KeyOutlined /> 重置密码
+                    </a-button>
                     <a-popconfirm
                       title="确定删除此账号？"
                       @confirm="handleDeleteUser(record.id)"
@@ -78,6 +81,65 @@
             <div class="section-header">
               <h3>角色列表</h3>
             </div>
+
+            <!-- RabbitMQ 用户管理 - 仅超级管理员可见 -->
+            <a-card v-if="isSuperAdmin" title="RabbitMQ 用户管理" style="margin-bottom: 24px;" class="rabbitmq-card">
+              <template #extra>
+                <a-space>
+                  <a-button size="small" @click="loadRabbitMQUsers(true)" :loading="rabbitMQUsersLoading">
+                    <SyncOutlined /> 刷新
+                  </a-button>
+                  <a-tag color="purple">超级管理员专属</a-tag>
+                </a-space>
+              </template>
+              <p style="margin-bottom: 16px; color: rgba(255, 255, 255, 0.8);">
+                为执行机客户端创建 RabbitMQ 用户账号。执行机通过网络连接到服务器的 RabbitMQ 时使用此账号。
+              </p>
+              <a-button type="primary" @click="showCreateRabbitMQUser" style="margin-bottom: 16px;">
+                <PlusOutlined /> 创建 RabbitMQ 用户
+              </a-button>
+
+              <!-- RabbitMQ 用户列表 -->
+              <a-table
+                :columns="rabbitMQUserColumns"
+                :data-source="rabbitMQUsers"
+                :loading="rabbitMQUsersLoading"
+                :pagination="false"
+                size="small"
+                :row-key="'name'"
+                class="rabbitmq-users-table"
+              >
+                <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'name'">
+                    <a-space>
+                      <a-avatar :size="24" style="background: #667eea;">
+                        <UserOutlined />
+                      </a-avatar>
+                      <span style="color: rgba(255, 255, 255, 0.9); font-weight: 500;">{{ record.name }}</span>
+                    </a-space>
+                  </template>
+                  <template v-else-if="column.key === 'tags'">
+                    <a-tag v-if="record.tags" color="blue">{{ record.tags }}</a-tag>
+                    <a-tag v-else color="default">无标签</a-tag>
+                  </template>
+                  <template v-else-if="column.key === 'actions'">
+                    <a-space>
+                      <a-button size="small" @click="showChangePasswordRabbitMQ(record)">
+                        <KeyOutlined /> 改密
+                      </a-button>
+                      <a-popconfirm
+                        title="确定删除此 RabbitMQ 用户吗？删除后执行机将无法使用此账号连接。"
+                        @confirm="handleDeleteRabbitMQUser(record.name)"
+                      >
+                        <a-button size="small" danger>
+                          <DeleteOutlined /> 删除
+                        </a-button>
+                      </a-popconfirm>
+                    </a-space>
+                  </template>
+                </template>
+              </a-table>
+            </a-card>
 
             <a-row :gutter="[16, 16]">
               <a-col :xs="24" :sm="12" :lg="6" v-for="role in roles" :key="role.value">
@@ -182,6 +244,29 @@
       </a-form>
     </a-modal>
 
+    <!-- 重置密码确认对话框 -->
+    <a-modal
+      v-model:open="resetPasswordModalVisible"
+      title="重置密码"
+      width="400px"
+      @ok="handleResetPasswordOk"
+      @cancel="resetPasswordModalVisible = false"
+    >
+      <a-alert
+        message="警告"
+        :description="`确定要将用户 ${resetPasswordUser?.username} 的密码重置为默认密码吗？`"
+        type="warning"
+        show-icon
+        style="margin-bottom: 16px"
+      />
+      <p style="color: rgba(0, 0, 0, 0.65);">
+        重置后，该用户的密码将变为 <strong style="color: #f5222d;">123456</strong>。
+      </p>
+      <p style="color: rgba(0, 0, 0, 0.45); font-size: 12px;">
+        为了安全起见，请通知用户尽快修改密码。
+      </p>
+    </a-modal>
+
     <!-- 角色成员对话框 -->
     <a-modal
       v-model:open="roleUsersModalVisible"
@@ -205,24 +290,150 @@
         </template>
       </a-list>
     </a-modal>
+
+    <!-- 创建 RabbitMQ 用户对话框 -->
+    <a-modal
+      v-model:open="rabbitMQModalVisible"
+      title="创建 RabbitMQ 用户"
+      width="500px"
+      @ok="handleCreateRabbitMQUser"
+      @cancel="rabbitMQModalVisible = false"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="用户名" required>
+          <a-input
+            v-model:value="rabbitMQForm.username"
+            placeholder="请输入 RabbitMQ 用户名"
+            :prefix="h(UserOutlined)"
+          />
+          <template #extra>
+            <span style="color: #999; font-size: 12px;">
+              建议使用有意义的名称，如：executor-01
+            </span>
+          </template>
+        </a-form-item>
+        <a-form-item label="密码" required>
+          <a-input-password
+            v-model:value="rabbitMQForm.password"
+            placeholder="请输入密码"
+          />
+          <template #extra>
+            <span style="color: #999; font-size: 12px;">
+              密码将提供给执行机用户，用于配置执行机客户端
+            </span>
+          </template>
+        </a-form-item>
+        <a-form-item label="标签">
+          <a-select
+            v-model:value="rabbitMQForm.tags"
+            placeholder="选择用户标签"
+            mode="tags"
+          >
+            <a-select-option value="management">management</a-select-option>
+            <a-select-option value="policymaker">policymaker</a-select-option>
+            <a-select-option value="monitoring">monitoring</a-select-option>
+          </a-select>
+          <template #extra>
+            <span style="color: #999; font-size: 12px;">
+              management: 可访问管理插件；policymaker: 可制定策略；monitoring: 可访问监控插件
+            </span>
+          </template>
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <a-button @click="rabbitMQModalVisible = false">取消</a-button>
+        <a-button type="primary" @click="handleCreateRabbitMQUser" :loading="rabbitMQCreating">
+          创建用户
+        </a-button>
+      </template>
+    </a-modal>
+
+    <!-- RabbitMQ 用户创建成功对话框 -->
+    <a-modal
+      v-model:open="rabbitMQSuccessVisible"
+      title="用户创建成功"
+      width="500px"
+      :footer="null"
+    >
+      <a-result
+        status="success"
+        title="RabbitMQ 用户创建成功"
+        sub-title="请将以下信息提供给执行机用户"
+      >
+        <template #extra>
+          <a-descriptions bordered :column="1" style="margin-top: 16px;">
+            <a-descriptions-item label="用户名">{{ rabbitMQCreatedUser.username }}</a-descriptions-item>
+            <a-descriptions-item label="密码">
+              <a-typography-text copyable>{{ rabbitMQCreatedUser.password }}</a-typography-text>
+            </a-descriptions-item>
+            <a-descriptions-item label="标签">{{ rabbitMQCreatedUser.tags }}</a-descriptions-item>
+          </a-descriptions>
+          <a-alert
+            type="info"
+            message="配置说明"
+            description="在执行机客户端配置向导的「RabbitMQ 配置」页面中，填写上述用户名和密码。如果执行机和服务器在不同电脑，主机地址需填写服务器的实际 IP 地址。"
+            show-icon
+            style="margin-top: 16px;"
+          />
+          <a-button type="primary" @click="rabbitMQSuccessVisible = false" style="margin-top: 16px;">
+            知道了
+          </a-button>
+        </template>
+      </a-result>
+    </a-modal>
+
+    <!-- 修改 RabbitMQ 用户密码对话框 -->
+    <a-modal
+      v-model:open="rabbitMQPasswordModalVisible"
+      title="修改 RabbitMQ 用户密码"
+      width="450px"
+      @ok="handleChangeRabbitMQPassword"
+      @cancel="rabbitMQPasswordModalVisible = false"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="用户名">
+          <a-input
+            :value="rabbitMQPasswordUser.username"
+            disabled
+            :prefix="h(UserOutlined)"
+          />
+        </a-form-item>
+        <a-form-item label="新密码" required>
+          <a-input-password
+            v-model:value="rabbitMQPasswordForm.password"
+            placeholder="请输入新密码"
+          />
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <a-button @click="rabbitMQPasswordModalVisible = false">取消</a-button>
+        <a-button type="primary" @click="handleChangeRabbitMQPassword" :loading="rabbitMQPasswordUpdating">
+          确认修改
+        </a-button>
+      </template>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
+import { ref, computed, onMounted, h } from 'vue'
+import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
   UserSwitchOutlined,
-  SafetyOutlined
+  SafetyOutlined,
+  KeyOutlined,
+  UserOutlined,
+  SyncOutlined
 } from '@ant-design/icons-vue'
 import { userApi } from '@/api/user'
 import { roleApi } from '@/api/role'
 import type { Role } from '@/api/role'
 import { useUserStore } from '@/store/user'
+import axios from 'axios'
 
 const userStore = useUserStore()
 
@@ -247,10 +458,45 @@ const roleModalVisible = ref(false)
 const currentUser = ref<any>(null)
 const newRole = ref('')
 
+// RabbitMQ 用户管理相关
+const rabbitMQModalVisible = ref(false)
+const rabbitMQSuccessVisible = ref(false)
+const rabbitMQCreating = ref(false)
+const rabbitMQForm = ref({
+  username: '',
+  password: '',
+  tags: 'management'
+})
+const rabbitMQCreatedUser = ref({
+  username: '',
+  password: '',
+  tags: ''
+})
+
 const roleUsersModalVisible = ref(false)
 const selectedRole = ref<Role | null>(null)
 const roleUsers = ref<any[]>([])
 const roleUsersLoading = ref(false)
+
+// 重置密码相关
+const resetPasswordUser = ref<any>(null)
+const resetPasswordModalVisible = ref(false)
+
+// RabbitMQ 用户列表管理
+const rabbitMQUsers = ref<any[]>([])
+const rabbitMQUsersLoading = ref(false)
+const rabbitMQPasswordModalVisible = ref(false)
+const rabbitMQPasswordForm = ref({
+  password: ''
+})
+const rabbitMQPasswordUser = ref<any>(null)
+const rabbitMQPasswordUpdating = ref(false)
+
+const rabbitMQUserColumns = [
+  { title: '用户名', key: 'name', width: 200 },
+  { title: '标签', key: 'tags', width: 150 },
+  { title: '操作', key: 'actions', width: 200 }
+]
 
 const userColumns = [
   { title: '用户名', key: 'username', width: 200 },
@@ -258,7 +504,7 @@ const userColumns = [
   { title: '角色', key: 'role', width: 120 },
   { title: '状态', key: 'status', width: 100 },
   { title: '创建时间', key: 'created_at', width: 180 },
-  { title: '操作', key: 'actions', width: 220, fixed: 'right' }
+  { title: '操作', key: 'actions', width: 300, fixed: 'right' }
 ]
 
 const filteredUsers = computed(() => {
@@ -275,6 +521,14 @@ const canChangeRole = computed(() => {
 
 const canDeleteUser = computed(() => {
   return userStore.user?.role === 'admin' || userStore.user?.role === 'super_admin'
+})
+
+const canResetPassword = computed(() => {
+  return userStore.user?.role === 'admin' || userStore.user?.role === 'super_admin'
+})
+
+const isSuperAdmin = computed(() => {
+  return userStore.user?.role === 'super_admin'
 })
 
 async function loadUsers() {
@@ -340,11 +594,15 @@ async function handleUserOk() {
 
   try {
     if (isEditMode.value) {
-      await userApi.update(userForm.value.id, {
+      const updateData: any = {
         email: userForm.value.email,
-        password: userForm.value.password || undefined,
         role: userForm.value.role
-      })
+      }
+      // 只有输入了密码才发送
+      if (userForm.value.password) {
+        updateData.password = userForm.value.password
+      }
+      await userApi.update(userForm.value.id, updateData)
       message.success('更新成功')
     } else {
       await userApi.create({
@@ -408,6 +666,37 @@ function showChangeRole(user: any) {
   currentUser.value = user
   newRole.value = user.role
   roleModalVisible.value = true
+}
+
+function showResetPassword(user: any) {
+  resetPasswordUser.value = user
+  resetPasswordModalVisible.value = true
+}
+
+async function handleResetPasswordOk() {
+  if (!resetPasswordUser.value) return
+
+  try {
+    const res = await userApi.resetPassword(resetPasswordUser.value.id)
+    message.success({
+      content: `${res.message}`,
+      duration: 5
+    })
+    // 显示新密码
+    Modal.info({
+      title: '密码重置成功',
+      content: `用户 ${resetPasswordUser.value.username} 的新密码为：${res.default_password}，请通知用户及时修改密码。`,
+      okText: '知道了'
+    })
+    resetPasswordModalVisible.value = false
+    resetPasswordUser.value = null
+  } catch (error: any) {
+    if (error.response?.data?.error) {
+      message.error(error.response.data.error)
+    } else {
+      message.error('重置密码失败')
+    }
+  }
 }
 
 async function handleRoleOk() {
@@ -485,9 +774,140 @@ function formatDate(date: string): string {
   return dayjs(date).format('YYYY-MM-DD HH:mm')
 }
 
+// RabbitMQ 用户管理函数
+function showCreateRabbitMQUser() {
+  rabbitMQForm.value = {
+    username: '',
+    password: '',
+    tags: 'management'
+  }
+  rabbitMQModalVisible.value = true
+}
+
+async function handleCreateRabbitMQUser() {
+  if (!rabbitMQForm.value.username || !rabbitMQForm.value.password) {
+    message.error('请填写用户名和密码')
+    return
+  }
+
+  rabbitMQCreating.value = true
+  try {
+    const response = await axios.post('/api/users/create_rabbitmq_user/', {
+      username: rabbitMQForm.value.username,
+      password: rabbitMQForm.value.password,
+      tags: rabbitMQForm.value.tags
+    })
+
+    // 保存创建的用户信息
+    rabbitMQCreatedUser.value = {
+      username: rabbitMQForm.value.username,
+      password: rabbitMQForm.value.password,
+      tags: rabbitMQForm.value.tags
+    }
+
+    // 关闭创建对话框
+    rabbitMQModalVisible.value = false
+
+    // 显示成功对话框
+    rabbitMQSuccessVisible.value = true
+
+    message.success('RabbitMQ 用户创建成功')
+  } catch (error: any) {
+    if (error.response?.data?.error) {
+      message.error(error.response.data.error)
+    } else {
+      message.error('创建用户失败，请检查网络连接和 RabbitMQ 服务状态')
+    }
+  } finally {
+    rabbitMQCreating.value = false
+  }
+}
+
+// 加载 RabbitMQ 用户列表
+async function loadRabbitMQUsers(showSuccess = false) {
+  if (!isSuperAdmin.value) return
+
+  rabbitMQUsersLoading.value = true
+  try {
+    const response = await axios.get('/api/users/list_rabbitmq_users/')
+    rabbitMQUsers.value = response.data.users || []
+    if (showSuccess) {
+      message.success('RabbitMQ 用户列表已刷新')
+    }
+  } catch (error: any) {
+    if (error.response?.data?.error) {
+      message.error(error.response.data.error)
+    } else {
+      message.error('获取用户列表失败，请检查 RabbitMQ 服务状态')
+    }
+    rabbitMQUsers.value = []
+  } finally {
+    rabbitMQUsersLoading.value = false
+  }
+}
+
+// 删除 RabbitMQ 用户
+async function handleDeleteRabbitMQUser(username: string) {
+  try {
+    await axios.post('/api/users/delete_rabbitmq_user/', { username })
+    message.success(`RabbitMQ 用户 ${username} 已删除`)
+    // 刷新用户列表
+    loadRabbitMQUsers()
+  } catch (error: any) {
+    if (error.response?.data?.error) {
+      message.error(error.response.data.error)
+    } else {
+      message.error('删除用户失败，请检查网络连接')
+    }
+  }
+}
+
+// 显示修改密码对话框
+function showChangePasswordRabbitMQ(user: any) {
+  rabbitMQPasswordUser.value = {
+    username: user.name
+  }
+  rabbitMQPasswordForm.value = {
+    password: ''
+  }
+  rabbitMQPasswordModalVisible.value = true
+}
+
+// 修改 RabbitMQ 用户密码
+async function handleChangeRabbitMQPassword() {
+  if (!rabbitMQPasswordForm.value.password) {
+    message.error('请输入新密码')
+    return
+  }
+
+  rabbitMQPasswordUpdating.value = true
+  try {
+    await axios.post('/api/users/update_rabbitmq_user_password/', {
+      username: rabbitMQPasswordUser.value.username,
+      password: rabbitMQPasswordForm.value.password
+    })
+    message.success('密码修改成功')
+    rabbitMQPasswordModalVisible.value = false
+    rabbitMQPasswordForm.value = { password: '' }
+    rabbitMQPasswordUser.value = null
+  } catch (error: any) {
+    if (error.response?.data?.error) {
+      message.error(error.response.data.error)
+    } else {
+      message.error('修改密码失败，请检查网络连接')
+    }
+  } finally {
+    rabbitMQPasswordUpdating.value = false
+  }
+}
+
 onMounted(() => {
   loadUsers()
   loadRoles()
+  // 如果是超级管理员，加载 RabbitMQ 用户列表
+  if (isSuperAdmin.value) {
+    loadRabbitMQUsers()
+  }
 })
 </script>
 
@@ -563,6 +983,54 @@ onMounted(() => {
   font-size: 12px;
   color: #999;
   margin-bottom: 8px;
+}
+
+/* RabbitMQ 卡片样式 */
+.rabbitmq-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+}
+
+.rabbitmq-card :deep(.ant-card-head-title) {
+  color: white;
+}
+
+.rabbitmq-card :deep(.ant-card-body) {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.rabbitmq-card p {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+/* RabbitMQ 用户表格样式 */
+.rabbitmq-users-table {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+.rabbitmq-users-table :deep(.ant-table) {
+  background: transparent;
+}
+
+.rabbitmq-users-table :deep(.ant-table-thead > tr > th) {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.rabbitmq-users-table :deep(.ant-table-tbody > tr > td) {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.rabbitmq-users-table :deep(.ant-table-tbody > tr:hover > td) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.rabbitmq-users-table :deep(.ant-empty-description) {
+  color: rgba(255, 255, 255, 0.7);
 }
 
 /* 响应式 */

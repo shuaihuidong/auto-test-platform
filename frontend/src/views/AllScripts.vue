@@ -145,6 +145,46 @@
         </template>
       </a-table>
     </a-card>
+
+    <!-- 执行机选择模态框 -->
+    <a-modal
+      v-model:open="showExecutorModal"
+      title="选择执行机"
+      @ok="confirmRunScript"
+      @cancel="cancelRunScript"
+    >
+      <a-form :label-col="{ span: 5 }" :wrapper-col="{ span: 19 }">
+        <a-form-item label="执行机">
+          <a-select
+            v-model:value="selectedExecutorId"
+            placeholder="自动分配可用执行机"
+            allow-clear
+            :loading="loadingExecutors"
+            show-search
+            :filter-option="filterExecutorOption"
+          >
+            <a-select-option v-for="executor in availableExecutors" :key="executor.id" :value="executor.id">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>{{ executor.name }}</span>
+                <span>
+                  <a-tag v-if="executor.is_online" color="green" size="small">在线</a-tag>
+                  <a-tag v-else color="red" size="small">离线</a-tag>
+                  <span style="color: #999; font-size: 12px;">
+                    {{ executor.current_tasks }}/{{ executor.max_concurrent }}
+                  </span>
+                </span>
+              </div>
+            </a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item>
+          <template #label>
+            <span style="color: #999;">提示</span>
+          </template>
+          <span style="color: #666;">不选择则系统自动分配可用的在线执行机</span>
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -163,6 +203,7 @@ import {
 import { getScriptList as getScriptListApi, deleteScript as deleteScriptApi, duplicateScript as duplicateScriptApi } from '@/api/script'
 import { getProjectList } from '@/api/project'
 import { createExecution } from '@/api/execution'
+import { executorApi, type Executor } from '@/api/executor'
 import type { Script } from '@/types/script'
 
 const router = useRouter()
@@ -170,6 +211,13 @@ const router = useRouter()
 const loading = ref(false)
 const scripts = ref<Script[]>([])
 const projects = ref<any[]>([])
+
+// 执行机选择相关
+const showExecutorModal = ref(false)
+const selectedExecutorId = ref<number | null>(null)
+const availableExecutors = ref<Executor[]>([])
+const loadingExecutors = ref(false)
+const scriptToRun = ref<Script | null>(null)
 
 const filters = ref({
   project_id: null,
@@ -253,15 +301,44 @@ function goToProject(projectId: number) {
 }
 
 async function runScript(script: Script) {
+  scriptToRun.value = script
+  selectedExecutorId.value = null
+  showExecutorModal.value = true
+  await loadExecutors()
+}
+
+async function loadExecutors() {
+  loadingExecutors.value = true
   try {
-    await createExecution({
-      script_id: script.id
-    })
+    availableExecutors.value = await executorApi.getAvailable({ project_id: scriptToRun.value?.project })
+  } catch (error) {
+    // 错误已由拦截器处理
+  } finally {
+    loadingExecutors.value = false
+  }
+}
+
+async function confirmRunScript() {
+  if (!scriptToRun.value) return
+
+  try {
+    const params: any = { script_id: scriptToRun.value.id }
+    if (selectedExecutorId.value) {
+      params.executor_id = selectedExecutorId.value
+    }
+    await createExecution(params)
     message.success('执行任务已创建')
+    showExecutorModal.value = false
     router.push('/executions')
   } catch (error) {
     // 错误已由拦截器处理
   }
+}
+
+function cancelRunScript() {
+  showExecutorModal.value = false
+  scriptToRun.value = null
+  selectedExecutorId.value = null
 }
 
 async function duplicateScript(script: Script) {
@@ -330,6 +407,12 @@ function formatDate(date: string) {
 function filterProjectOption(input: string, option: any): boolean {
   if (!option || !option.children) return false
   const text = String(option.children).toLowerCase()
+  return text.includes(input.toLowerCase())
+}
+
+function filterExecutorOption(input: string, option: any): boolean {
+  if (!option || !option.children) return false
+  const text = String(option.children[0]?.children || '').toLowerCase()
   return text.includes(input.toLowerCase())
 }
 
