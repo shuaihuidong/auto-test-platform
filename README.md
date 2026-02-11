@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.0-blue)
 ![Django](https://img.shields.io/badge/Django-4.2.7-green)
 ![Vue](https://img.shields.io/badge/Vue-3.3.8-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -20,7 +20,9 @@
 | 功能 | 描述 |
 |------|------|
 | 🎨 **可视化脚本编辑器** | 拖拉拽方式创建测试步骤，支持可视化/JSON 双模式编辑，8大类50+步骤类型 |
-| 🔧 **多框架支持** | Selenium、Playwright、Appium、HttpRunner |
+| 🔍 **步骤库优化** | 支持搜索和分类折叠，默认折叠状态提升页面加载体验 |
+| 💾 **智能保存检测** | 调试前自动检测未保存修改，提示用户保存后再执行 |
+| 🔧 **框架支持** | Selenium (一期已实现)、Playwright/Appium/HttpRunner (规划中) |
 | 📊 **丰富的测试报告** | ECharts 图表展示，HTML/PDF 报告导出，实时执行状态 |
 | 🧩 **模块化复用** | 将常用步骤保存为模块，提高脚本复用性 |
 | 📈 **参数化测试** | 支持数据驱动，批量执行测试 |
@@ -41,15 +43,17 @@
 | WebSocket | Daphne (ASGI服务器) | - |
 | 消息队列 | RabbitMQ + Pika | 3.12+ / 1.3.2 |
 | 数据库 | SQLite (支持 PostgreSQL/MySQL) | 3 |
-| 测试框架 | Selenium / Playwright / Appium / HttpRunner | 4.15.2 / 1.40.0 / 3.1.1 |
+| 测试框架 | Selenium (已实现) / Playwright / Appium / HttpRunner (规划中) | 4.15.2 |
 
 ## 支持的脚本类型
 
 | 类型 | 说明 | 支持框架 |
 |------|------|----------|
-| **Web自动化** | Web 应用 UI 自动化测试 | Selenium, Playwright |
-| **移动端自动化** | 移动应用 UI 自动化测试 | Appium |
-| **API接口测试** | HTTP/HTTPS 接口测试 | HttpRunner |
+| **Web自动化** | Web 应用 UI 自动化测试 | ✅ Selenium (已实现) · ⏳ Playwright (规划中) |
+| **移动端自动化** | 移动应用 UI 自动化测试 | ⏳ Appium (规划中) |
+| **API接口测试** | HTTP/HTTPS 接口测试 | ⏳ HttpRunner (规划中) |
+
+> **注意**: 一期版本中，executor-client 仅实现了 Selenium 框架支持。Playwright、Appium 和 HttpRunner 已在平台侧预留接口，将在后续版本中实现。选择未实现框架时会有友好提示。
 
 ## 权限分级
 
@@ -477,13 +481,18 @@ python main.py
 
 ```
 1. 创建项目 → 选择项目类型 (Web/移动端/API)
-2. 新建脚本 → 选择测试框架 (Selenium/Playwright/Appium/HttpRunner)
-3. 编辑步骤 → 从左侧拖拽步骤到画布
+2. 新建脚本 → 选择测试框架 (Selenium 已可用，其他框架规划中)
+3. 编辑步骤 → 从左侧拖拽步骤到画布（支持搜索步骤、折叠分类）
 4. 配置参数 → 在右侧属性面板配置步骤参数
-5. 保存脚本 → 保存脚本
-6. 运行测试 → 点击运行按钮执行
+5. 保存脚本 → 保存脚本（调试时会自动检测未保存修改）
+6. 运行测试 → 点击调试按钮，选择执行机执行
 7. 查看报告 → 查看执行结果和统计图表
 ```
+
+**新功能提示**:
+- 📁 步骤库默认折叠状态，点击分类展开查看步骤
+- 🔍 顶部搜索框快速查找步骤类型
+- 💾 调试前智能检测未保存修改，避免遗漏保存
 
 ### 步骤类型说明
 
@@ -918,13 +927,33 @@ curl -X POST http://localhost:8000/api/executor/heartbeat/ \
 | Edge | 90+ |
 | Safari | 14+ |
 
+## 更新日志
+
+### v1.2.0 (2026-02-11) - 一期完成版本
+
+**新增功能**:
+- 步骤库支持搜索功能，快速定位所需步骤
+- 步骤分类支持折叠/展开，默认折叠状态
+- 执行机选择优化为下拉框，支持多执行机场景
+- 未保存修改智能检测，调试前提示保存
+- 框架可用性警告提示，清晰标注未实现功能
+
+**优化改进**:
+- 脚本编辑器布局优化，移除冗余按钮
+- 执行机选择交互优化，下拉框更直观
+- 页面标题颜色修复（测试计划页面）
+
+**Bug修复**:
+- 修复步骤库默认折叠不生效问题
+- 修复编译错误导致的页面加载问题
+
 ## 路线图
 
-### v1.2 (计划中)
-- [ ] 支持更多测试框架 (Cypress, Robot Framework)
+### v1.3 (计划中)
+- [ ] Playwright 框架支持实现
+- [ ] Appium 移动端自动化支持
+- [ ] HttpRunner API 测试支持
 - [ ] CI/CD 集成 (Jenkins, GitLab CI)
-- [ ] 测试数据自动生成
-- [ ] 性能测试支持
 
 ### v2.0 (未来)
 - [ ] 分布式执行集群
