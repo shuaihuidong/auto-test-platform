@@ -92,9 +92,6 @@
             </a-form-item>
           </a-form>
 
-          <div class="form-footer">
-            <p>默认账号: <code>admin</code> / <code>admin123</code></p>
-          </div>
         </div>
       </div>
     </div>
