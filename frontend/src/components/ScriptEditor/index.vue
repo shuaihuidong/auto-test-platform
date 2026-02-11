@@ -42,19 +42,9 @@
           <ClearOutlined />
           清空
         </SimpleButton>
-        <SimpleButton variant="default" @click="undo" :disabled="!canUndo">
-          <UndoOutlined />
-        </SimpleButton>
-        <SimpleButton variant="default" @click="redo" :disabled="!canRedo">
-          <RedoOutlined />
-        </SimpleButton>
-        <SimpleButton @click="$emit('save')" :loading="saving">
-          <SaveOutlined />
-          保存
-        </SimpleButton>
         <SimpleButton variant="primary" @click="$emit('run')">
           <PlayCircleOutlined />
-          运行
+          调试
         </SimpleButton>
       </div>
     </div>
@@ -63,12 +53,38 @@
     <div class="editor-body">
       <!-- Left: Step Palette -->
       <div class="step-palette">
+        <!-- Search Box -->
+        <div class="step-search">
+          <SearchOutlined class="search-icon" />
+          <input
+            v-model="stepSearchQuery"
+            type="text"
+            placeholder="搜索步骤..."
+            class="search-input"
+          />
+          <SimpleButton
+            v-if="stepSearchQuery"
+            variant="text"
+            size="small"
+            class="search-clear"
+            @click="stepSearchQuery = ''"
+          >
+            <CloseOutlined />
+          </SimpleButton>
+        </div>
+
+        <!-- Step Categories -->
         <div v-for="category in stepCategories" :key="category.name" class="step-category">
-          <div class="category-title">
+          <div class="category-title" @click="toggleCategoryCollapse(category.name)">
+            <component
+              :is="isCategoryCollapsed(category.name) ? RightOutlined : DownOutlined"
+              class="collapse-icon"
+            />
             <component :is="category.icon" class="category-icon" />
             {{ category.label }}
+            <span class="step-count-badge">{{ category.steps.length }}</span>
           </div>
-          <div class="category-items">
+          <div v-show="!isCategoryCollapsed(category.name)" class="category-items">
             <StepCard
               v-for="step in category.steps"
               :key="step.type"
@@ -222,12 +238,12 @@ import draggable from 'vuedraggable'
 import {
   SettingOutlined,
   ClearOutlined,
-  UndoOutlined,
-  RedoOutlined,
-  SaveOutlined,
   PlayCircleOutlined,
   CloseOutlined,
-  DatabaseOutlined
+  DatabaseOutlined,
+  SearchOutlined,
+  DownOutlined,
+  RightOutlined
 } from '@ant-design/icons-vue'
 
 // Components
@@ -246,7 +262,6 @@ interface Props {
   modelValue: TestStep[]
   scriptType: ScriptType
   framework: Framework
-  saving?: boolean
   projectId?: number
   scriptId?: number
   modules?: any[]
@@ -255,13 +270,11 @@ interface Props {
 
 interface Emits {
   (e: 'update:modelValue', value: TestStep[]): void
-  (e: 'save'): void
   (e: 'run'): void
   (e: 'typeChange', selection: { type: ScriptType; framework: Framework }): void
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  saving: false,
   modules: () => [],
   showTypeSelector: false
 })
@@ -279,11 +292,6 @@ const jsonError = ref('')
 // Track external updates to prevent overriding local edits
 const lastExternalUpdate = ref<number>(Date.now())
 
-// History for undo/redo
-const historyStack = ref<TestStep[][]>([])
-const historyIndex = ref(-1)
-const maxHistorySize = 50
-
 // Clipboard
 const clipboard = ref<TestStep | null>(null)
 
@@ -293,49 +301,78 @@ const projectVariables = ref<Variable[]>([])
 const scriptVariables = ref<Variable[]>([])
 const currentInsertField = ref<string>('')
 
+// Step palette search & collapse
+const stepSearchQuery = ref('')
+const collapsedCategories = ref<Set<string>>(new Set())
+const collapseInitialized = ref(false)
+
+// Initialize collapsed categories
+function initCollapsedCategories() {
+  if (collapseInitialized.value) return
+  const categories = getStepCategories(props.scriptType)
+  categories.forEach(cat => {
+    collapsedCategories.value.add(cat.name)
+  })
+  collapseInitialized.value = true
+}
+
+// Watch for script type changes to reinitialize
+watch(() => props.scriptType, () => {
+  collapseInitialized.value = false
+  collapsedCategories.value = new Set()
+  initCollapsedCategories()
+}, { immediate: true })
+
 // Computed properties
 const steps = computed({
   get: () => localSteps.value,
   set: (value) => {
     localSteps.value = value
-    isLocalUpdate = true  // Mark this as a local update
+    isLocalUpdate = true
     emit('update:modelValue', value)
   }
 })
 
 const stepCategories = computed(() => {
-  return getStepCategories(props.scriptType)
+  const categories = getStepCategories(props.scriptType)
+  const query = stepSearchQuery.value.toLowerCase().trim()
+
+  if (!query) {
+    return categories
+  }
+
+  // Filter steps based on search query
+  return categories
+    .map(category => ({
+      ...category,
+      steps: category.steps.filter(step =>
+        step.label.toLowerCase().includes(query) ||
+        step.description?.toLowerCase().includes(query)
+      )
+    }))
+    .filter(category => category.steps.length > 0)
 })
 
-const canUndo = computed(() => historyIndex.value > 0)
-const canRedo = computed(() => historyIndex.value < historyStack.value.length - 1)
-
-// Watch for external changes (only when script is first loaded or externally updated)
+// Watch for external changes
 let isInitializing = true
 let lastKnownValue = JSON.stringify(props.modelValue)
-let isLocalUpdate = false  // Track if we're causing the update
+let isLocalUpdate = false
 
-watch(() => props.modelValue, (newValue, oldValue) => {
+watch(() => props.modelValue, (newValue) => {
   const newValueStr = JSON.stringify(newValue)
 
-  // Skip if this is an update we caused ourselves
   if (isLocalUpdate) {
     isLocalUpdate = false
     lastKnownValue = newValueStr
     return
   }
 
-  // Only update if the value actually changed (not just a reference change)
   if (newValueStr !== lastKnownValue) {
-    // During initialization, just sync
     if (isInitializing) {
       localSteps.value = [...newValue]
       lastKnownValue = newValueStr
       isInitializing = false
     } else {
-      // After initialization, only sync if the content is meaningfully different
-      // This handles external updates (e.g., from server) without overwriting local edits
-      // We need to check if this is a true external change
       if (JSON.stringify(localSteps.value) !== newValueStr) {
         localSteps.value = [...newValue]
         lastKnownValue = newValueStr
@@ -343,10 +380,6 @@ watch(() => props.modelValue, (newValue, oldValue) => {
     }
   }
 }, { deep: true })
-
-// Don't watch steps for history - it causes too many issues
-// History will be added manually on important actions instead
-// Remove the automatic history watch to prevent state reset issues
 
 // Watch editor mode changes
 watch(editorMode, (newMode) => {
@@ -372,10 +405,9 @@ function clearSelection() {
 function updateStep(step: TestStep) {
   const index = steps.value.findIndex(s => s.id === step.id)
   if (index !== -1) {
-    // Create a new array reference to trigger reactivity
     const newSteps = [...steps.value]
     newSteps[index] = step
-    steps.value = newSteps // This will trigger the computed setter and emit to parent
+    steps.value = newSteps
 
     if (selectedStepId.value === step.id) {
       selectedStep.value = step
@@ -410,10 +442,8 @@ function handleDrop(event: DragEvent) {
 }
 
 function handleDragEnd() {
-  // After drag completes, sync with parent through emit
-  // This ensures parent has the latest order
   const currentSteps = [...localSteps.value]
-  isLocalUpdate = true  // Mark this as a local update
+  isLocalUpdate = true
   emit('update:modelValue', currentSteps)
   message.success('步骤顺序已更新')
 }
@@ -471,24 +501,6 @@ function handleTypeChange() {
   }
 }
 
-function undo() {
-  if (canUndo.value) {
-    historyIndex.value--
-    steps.value = JSON.parse(JSON.stringify(historyStack.value[historyIndex.value]))
-    clearSelection()
-    message.success('已撤销')
-  }
-}
-
-function redo() {
-  if (canRedo.value) {
-    historyIndex.value++
-    steps.value = JSON.parse(JSON.stringify(historyStack.value[historyIndex.value]))
-    clearSelection()
-    message.success('已重做')
-  }
-}
-
 function syncFromJson() {
   try {
     const parsed = JSON.parse(jsonContent.value)
@@ -525,11 +537,6 @@ function showVariableSelectorFor(field: string) {
 
 function insertVariable(variable: Variable) {
   if (!selectedStep.value) return
-
-  const placeholder = `\${${variable.name}}`
-  // Logic to insert variable into the selected field
-  // This depends on the field structure
-
   variableSelectorVisible.value = false
 }
 
@@ -541,7 +548,6 @@ function formatVariablePreview(variable: Variable): string {
 
 function loadVariables() {
   // Load variables from API
-  // This would integrate with the variable API
 }
 
 function getTypeLabel(type: ScriptType): string {
@@ -564,26 +570,31 @@ function getFrameworkLabel(framework: Framework): string {
 }
 
 function getTypeIcon(type: ScriptType) {
-  // Return appropriate icon component
   return null
 }
 
 function showHelp() {
   Modal.info({
     title: '使用帮助',
-    content: '从左侧步骤库中拖拽步骤到中间画布，点击步骤编辑属性，支持撤销/重做操作。'
+    content: '从左侧步骤库中拖拽步骤到中间画布，点击步骤编辑属性。'
   })
+}
+
+function toggleCategoryCollapse(categoryName: string) {
+  if (collapsedCategories.value.has(categoryName)) {
+    collapsedCategories.value.delete(categoryName)
+  } else {
+    collapsedCategories.value.add(categoryName)
+  }
+}
+
+function isCategoryCollapsed(categoryName: string): boolean {
+  return collapsedCategories.value.has(categoryName)
 }
 
 // Keyboard shortcuts
 function handleKeydown(event: KeyboardEvent) {
-  if ((event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey) {
-    event.preventDefault()
-    undo()
-  } else if ((event.ctrlKey || event.metaKey) && (event.key === 'y' || (event.key === 'z' && event.shiftKey))) {
-    event.preventDefault()
-    redo()
-  } else if (event.key === 'Delete' && selectedStepId.value) {
+  if (event.key === 'Delete' && selectedStepId.value) {
     const step = steps.value.find(s => s.id === selectedStepId.value)
     if (step) removeStep(step)
   }
@@ -592,10 +603,7 @@ function handleKeydown(event: KeyboardEvent) {
 // Lifecycle
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
-  if (steps.value.length > 0) {
-    historyStack.value.push(JSON.parse(JSON.stringify(steps.value)))
-    historyIndex.value = 0
-  }
+  initCollapsedCategories()
 })
 
 onUnmounted(() => {
@@ -607,10 +615,9 @@ onUnmounted(() => {
 .script-editor {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 700px;
   background: var(--color-bg-secondary);
   border-radius: var(--radius-lg);
-  overflow: hidden;
 }
 
 /* Header */
@@ -641,12 +648,19 @@ onUnmounted(() => {
   color: var(--color-primary);
 }
 
+.type-info > span:not(.framework-badge) {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
 .framework-badge {
-  padding: 2px 8px;
-  background: var(--color-primary-light);
-  color: var(--color-primary);
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+  color: #ffffff;
   font-size: var(--font-size-xs);
+  font-weight: 600;
   border-radius: var(--radius-sm);
+  box-shadow: 0 1px 3px rgba(24, 144, 255, 0.3);
 }
 
 .header-center {
@@ -696,20 +710,55 @@ onUnmounted(() => {
 .editor-body {
   flex: 1;
   display: flex;
-  overflow: hidden;
 }
 
 /* Left: Step Palette */
 .step-palette {
-  width: 240px;
+  width: 280px;
   background: var(--color-bg-primary);
   border-right: 1px solid var(--color-border-light);
-  overflow-y: auto;
   padding: var(--spacing-md);
 }
 
+/* Search Box */
+.step-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: 0 var(--spacing-sm);
+}
+
+.search-icon {
+  font-size: 14px;
+  color: var(--color-text-tertiary);
+  margin-right: var(--spacing-xs);
+}
+
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: var(--spacing-sm) 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.search-clear {
+  margin-left: var(--spacing-xs);
+  color: var(--color-text-tertiary);
+}
+
 .step-category {
-  margin-bottom: var(--spacing-lg);
+  margin-bottom: var(--spacing-md);
 }
 
 .category-title {
@@ -722,10 +771,31 @@ onUnmounted(() => {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: var(--spacing-sm);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition-fast);
+}
+
+.category-title:hover {
+  color: var(--color-text-secondary);
+}
+
+.collapse-icon {
+  font-size: 10px;
+  transition: transform var(--transition-fast);
 }
 
 .category-icon {
   font-size: 14px;
+}
+
+.step-count-badge {
+  margin-left: auto;
+  padding: 2px 6px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  color: var(--color-text-tertiary);
 }
 
 .category-items {
@@ -738,7 +808,6 @@ onUnmounted(() => {
 .canvas-area {
   flex: 1;
   background: var(--color-bg-secondary);
-  overflow-y: auto;
   padding: var(--spacing-lg);
 }
 
@@ -791,7 +860,7 @@ onUnmounted(() => {
   border-left: 1px solid var(--color-border-light);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  max-height: 700px;
 }
 
 .panel-header {

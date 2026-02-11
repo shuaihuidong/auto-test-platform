@@ -549,7 +549,7 @@ onMounted(() => {
 
 .page-header h2 {
   margin: 0;
-  color: #1F2937;
+  color: #ffffff;
 }
 
 .filter-section {

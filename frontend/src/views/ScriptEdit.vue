@@ -10,6 +10,42 @@
       @cancel="handleTypeCancel"
     />
 
+    <!-- Executor Selection Modal -->
+    <a-modal
+      v-model:open="showExecutorModal"
+      title="选择执行机"
+      :width="400"
+      @ok="confirmDebug"
+      @cancel="showExecutorModal = false"
+    >
+      <div class="executor-modal-content">
+        <p class="modal-tip">请选择用于调试的执行机：</p>
+        <a-select
+          v-model:value="selectedExecutor"
+          placeholder="请选择执行机"
+          :loading="loadingExecutors"
+          size="large"
+          style="width: 100%"
+        >
+          <a-select-option
+            v-for="executor in availableExecutors"
+            :key="executor.id"
+            :value="executor.id"
+          >
+            <div class="select-option-content">
+              <span class="executor-name">{{ executor.name }}</span>
+              <a-tag v-if="executor.is_online" color="success" size="small">在线</a-tag>
+              <a-tag v-else color="default" size="small">离线</a-tag>
+              <span class="executor-info">
+                {{ executor.platform }} · 负载: {{ executor.current_tasks }}/{{ executor.max_concurrent }}
+              </span>
+            </div>
+          </a-select-option>
+        </a-select>
+        <a-empty v-if="availableExecutors.length === 0" description="暂无可用执行机" :image-size="80" />
+      </div>
+    </a-modal>
+
     <!-- Page Header -->
     <div class="page-header">
       <div class="header-left">
@@ -103,12 +139,10 @@
           v-model="form.steps"
           :script-type="form.type"
           :framework="form.framework"
-          :saving="saving"
           :project-id="form.project"
           :script-id="scriptId ? parseInt(scriptId) : undefined"
           :modules="modules"
           :show-type-selector="isNew && form.steps.length === 0"
-          @save="handleSave"
           @run="handleRun"
           @type-change="handleTypeChange"
         />
@@ -121,9 +155,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import {
   ArrowLeftOutlined,
   SaveOutlined,
@@ -137,7 +171,10 @@ import SimpleCheckbox from '@/components/ui/SimpleCheckbox.vue'
 import SimpleCard from '@/components/ui/SimpleCard.vue'
 import SkeletonLoader from '@/components/ui/SkeletonLoader.vue'
 import { getScript, createScript, updateScript, getScriptModules } from '@/api/script'
+import { executorApi } from '@/api/executor'
+import { createExecution } from '@/api/execution'
 import type { ScriptForm, ScriptType, Framework } from '@/types/script'
+import type { Executor } from '@/api/executor'
 
 const router = useRouter()
 const route = useRoute()
@@ -153,6 +190,16 @@ const showTypeModal = ref(false)
 const modules = ref<any[]>([])
 const nameError = ref('')
 
+// Executor related
+const availableExecutors = ref<Executor[]>([])
+const selectedExecutor = ref<number | null>(null)
+const showExecutorModal = ref(false)
+const loadingExecutors = ref(false)
+
+// Track unsaved changes
+const hasUnsavedChanges = ref(false)
+let originalFormJson = ''
+
 const form = ref<ScriptForm>({
   project: parseInt(projectId || '0'),
   name: '',
@@ -165,9 +212,16 @@ const form = ref<ScriptForm>({
   data_driven: false
 })
 
+// Watch for form changes to track unsaved changes
+watch(() => form.value, (newVal) => {
+  const currentJson = JSON.stringify(newVal)
+  hasUnsavedChanges.value = currentJson !== originalFormJson
+}, { deep: true })
+
 // Show type modal for new scripts without type
 onMounted(() => {
   loadModules()
+  loadExecutors()
   if (!isNew.value) {
     loadScript()
   } else {
@@ -192,6 +246,8 @@ async function loadScript() {
       module_name: script.module_name || '',
       data_driven: script.data_driven
     }
+    // Record original state after loading
+    originalFormJson = JSON.stringify(form.value)
   } catch (error) {
     // Error handled by interceptor
   } finally {
@@ -206,6 +262,16 @@ async function loadModules() {
   } catch (error) {
     console.error('Failed to load modules:', error)
     modules.value = []
+  }
+}
+
+async function loadExecutors() {
+  try {
+    const res = await executorApi.getAvailable({ project_id: form.value.project })
+    availableExecutors.value = res || []
+  } catch (error) {
+    console.error('Failed to load executors:', error)
+    availableExecutors.value = []
   }
 }
 
@@ -268,7 +334,9 @@ async function handleSave() {
     } else {
       await updateScript(parseInt(scriptId!), form.value)
       message.success('保存成功')
-      // 保存后不跳转，留在编辑页面
+      // Update original state after saving
+      originalFormJson = JSON.stringify(form.value)
+      hasUnsavedChanges.value = false
     }
   } catch (error) {
     // Error handled by interceptor
@@ -277,8 +345,86 @@ async function handleSave() {
   }
 }
 
-function handleRun() {
-  handleSave()
+async function handleRun() {
+  // 验证脚本名称
+  if (!form.value.name) {
+    nameError.value = '请输入脚本名称'
+    message.error('请输入脚本名称')
+    return
+  }
+
+  // 检查是否有未保存的修改
+  if (hasUnsavedChanges.value) {
+    Modal.confirm({
+      title: '有未保存的修改',
+      content: '脚本有未保存的修改，是否先保存后再调试？',
+      okText: '保存并调试',
+      cancelText: '取消',
+      onOk: async () => {
+        await handleSave()
+        await showExecutorSelector()
+      }
+    })
+    return
+  }
+
+  // 如果是新建脚本，需要先保存
+  if (isNew.value) {
+    Modal.confirm({
+      title: '保存新脚本',
+      content: '调试需要先保存脚本，是否立即保存？',
+      okText: '保存并调试',
+      cancelText: '取消',
+      onOk: async () => {
+        await handleSave()
+        await showExecutorSelector()
+      }
+    })
+    return
+  }
+
+  // 已保存的脚本，直接显示执行机选择
+  await showExecutorSelector()
+}
+
+async function showExecutorSelector() {
+  // 重新加载执行机列表
+  loadingExecutors.value = true
+  await loadExecutors()
+  loadingExecutors.value = false
+
+  // 检查是否有可用执行机
+  if (availableExecutors.value.length === 0) {
+    message.warning('暂无可用执行机，请先添加并启动执行机')
+    return
+  }
+
+  // 显示执行机选择对话框
+  selectedExecutor.value = null
+  showExecutorModal.value = true
+}
+
+async function confirmDebug() {
+  if (!selectedExecutor.value) {
+    message.error('请选择执行机')
+    return
+  }
+
+  const currentScriptId = scriptId ? parseInt(scriptId) : (await createScript(form.value)).id
+
+  try {
+    await createExecution({
+      script_id: currentScriptId,
+      executor_id: selectedExecutor.value
+    })
+    message.success('调试任务已创建')
+    showExecutorModal.value = false
+
+    // 跳转到执行记录页面
+    router.push('/executions')
+  } catch (error) {
+    console.error('Failed to create execution:', error)
+  }
 }
 
 function getTypeLabel(type: ScriptType): string {
@@ -307,7 +453,7 @@ function getTypeIcon(type: ScriptType) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: var(--spacing-xl);
+  margin-bottom: var(--spacing-lg);
 }
 
 .page-header h2 {
@@ -324,7 +470,6 @@ function getTypeIcon(type: ScriptType) {
 }
 
 .info-card {
-  flex-shrink: 0;
 }
 
 .card-title {
@@ -380,13 +525,19 @@ function getTypeIcon(type: ScriptType) {
   color: var(--color-primary);
 }
 
+.type-display span {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
 .framework-badge {
   padding: 4px 12px;
-  background: var(--color-primary-light);
-  color: var(--color-primary);
+  background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+  color: #ffffff;
   font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font-weight: 600;
   border-radius: var(--radius-sm);
+  box-shadow: 0 1px 3px rgba(24, 144, 255, 0.3);
 }
 
 .checkbox-wrapper {
@@ -396,8 +547,7 @@ function getTypeIcon(type: ScriptType) {
 }
 
 .editor-card {
-  flex: 1;
-  min-height: 600px;
+  min-height: 800px;
 }
 
 .loading-container {
@@ -406,5 +556,34 @@ function getTypeIcon(type: ScriptType) {
   justify-content: center;
   height: 600px;
   padding: var(--spacing-xl);
+}
+
+/* Executor Modal */
+.executor-modal-content {
+  padding: var(--spacing-md) 0;
+}
+
+.modal-tip {
+  margin-bottom: var(--spacing-md);
+  color: var(--color-text-secondary);
+}
+
+.select-option-content {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 4px 0;
+  width: 100%;
+}
+
+.select-option-content .executor-name {
+  font-size: 13px;
+  color: #666;
+}
+
+.select-option-content .executor-info {
+  margin-left: auto;
+  font-size: 12px;
+  color: #999;
 }
 </style>

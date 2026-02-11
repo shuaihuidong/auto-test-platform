@@ -149,7 +149,7 @@ const frameworkOptionsMap: Record<ScriptType, FrameworkOption[]> = {
     {
       value: 'playwright',
       label: 'Playwright',
-      description: '现代化 Web 测试框架，支持多浏览器和快速执行',
+      description: '现代化 Web 测试框架 (功能测试中，暂不可用)',
       icon: 'playwright'
     }
   ],
@@ -157,7 +157,7 @@ const frameworkOptionsMap: Record<ScriptType, FrameworkOption[]> = {
     {
       value: 'appium',
       label: 'Appium',
-      description: '跨平台移动应用自动化测试框架',
+      description: '跨平台移动应用自动化测试框架 (功能测试中，暂不可用)',
       icon: 'appium'
     }
   ],
@@ -165,7 +165,7 @@ const frameworkOptionsMap: Record<ScriptType, FrameworkOption[]> = {
     {
       value: 'httprunner',
       label: 'HttpRunner',
-      description: '简洁强大的 HTTP API 测试框架',
+      description: '简洁强大的 HTTP API 测试框架 (功能测试中，暂不可用)',
       icon: 'httprunner'
     }
   ]
@@ -210,7 +210,15 @@ function selectScriptType(type: ScriptType) {
 
 function selectFramework(framework: Framework) {
   selectedFramework.value = framework
-  errorMessage.value = ''
+  if (framework === 'playwright') {
+    errorMessage.value = '⚠️ Playwright 框架目前在功能测试中暂不可用，请选择 Selenium'
+  } else if (framework === 'appium') {
+    errorMessage.value = '⚠️ Appium 框架目前在功能测试中暂不可用，请选择其他框架'
+  } else if (framework === 'httprunner') {
+    errorMessage.value = '⚠️ HttpRunner 框架目前在功能测试中暂不可用，请选择其他框架'
+  } else {
+    errorMessage.value = ''
+  }
 }
 
 function typeCardClasses(type: ScriptType) {
