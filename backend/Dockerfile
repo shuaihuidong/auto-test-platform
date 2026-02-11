@@ -20,8 +20,8 @@ RUN pip install daphne
 # 复制项目文件
 COPY . .
 
-# 收集静态文件
-RUN python manage.py collectstatic --noinput
+# 收集静态文件（设置临时 SECRET_KEY 避免构建失败）
+RUN SECRET_KEY=dummy-for-build python manage.py collectstatic --noinput || true
 
 # 暴露端口
 EXPOSE 8000
