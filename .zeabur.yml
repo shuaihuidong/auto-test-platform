@@ -13,7 +13,7 @@ frontend:
   ports:
     - port: 80
       public: true
-    )
+
 # 后端服务配置
 backend:
   type: prebuilt
@@ -28,10 +28,9 @@ backend:
     - port: 8000
       public: true
   # 明确指定启动命令，确保 Zeabur 正确识别
-    startCommand: |
-      python manage.py migrate &&
-      daphne -b 0.0.0.0 -p 8000 core.asgi:application
-  )
+  startCommand: |
+    python manage.py migrate &&
+    daphne -b 0.0.0.0 -p 8000 core.asgi:application
 # RabbitMQ 消息队列服务
 rabbitmq:
   image: rabbitmq:3.12-management
