@@ -1,29 +1,115 @@
-# Render 免费部署指南
+# 自动化测试平台 - 部署指南
 
-本文档介绍如何将自动化测试管理平台免费部署到 Render.com。
+本文档提供多种部署方案，可根据实际需求选择。
 
-## 🚀 快速开始
+---
 
-### 方案架构
+## 📑 目录
+
+- [环境要求](#环境要求)
+- [方案一：本地开发部署](#方案一本地开发部署)
+- [方案二：Render 免费云部署](#方案二render-免费云部署) ⭐ 推荐
+- [方案三：Railway 免费云部署](#方案三railway-免费云部署)
+- [常见问题](#常见问题)
+
+---
+
+## 环境要求
+
+### 服务端
+
+| 软件 | 版本 | 说明 |
+|------|------|------|
+| Python | 3.9+ | 后端运行环境 |
+| RabbitMQ | 3.12+ | 消息队列服务 |
+
+### 前端
+
+| 软件 | 版本 | 说明 |
+|------|------|------|
+| Node.js | 16+ | 前端构建环境 |
+
+---
+
+## 方案一：本地开发部署
+
+适用于开发环境，快速启动所有服务。
+
+### 启动步骤
+
+```bash
+# 1. 启动 RabbitMQ
+cd D:\AI_project\auto-test-platform
+docker-compose up -d
+
+# 2. 启动后端（新终端）
+cd backend
+python manage.py runserver 0.0.0.0:8000
+
+# 3. 启动前端（新终端）
+cd frontend
+npm run dev
+```
+
+### 访问地址
+
+- 前端：http://localhost:5173 或 http://localhost:3000
+- 后端 API：http://localhost:8000/api/
+- 后端 WebSocket：ws://localhost:8000/ws/
+
+### 优势
+
+✅ 快速启动
+✅ 便于调试
+✅ 无网络延迟
+
+### 缺点
+
+❌ 需要本地运行所有服务
+❌ 无法分享给他人查看
+
+---
+
+## 方案二：Render 免费云部署 ⭐
+
+**推荐！** 最稳定的免费部署方案，适合演示和小团队使用。
+
+### 免费套餐
+
+| 资源 | 免费额度 |
+|--------|----------|
+| 运行时间 | 750 小时/月（约 31 天连续运行） |
+| RAM | 512MB |
+| CPU | 0.5 vCPU |
+| 存储 | 不包含（需外部数据库） |
+| 网络流量 | 100GB/月 |
+
+### 限制说明
+
+⚠️ 服务 15 分钟无请求会自动休眠
+⚠️ 休眠后首次访问需 30-60 秒冷启动
+💡 生产环境建议升级付费版（$7/月起）
+
+### 部署架构
 
 ```
-┌─────────────────────────────────────────────────────────────┐
+┌─────────────────────────────────────────────────────┐
 │                    Render.com Cloud                          │
-│  ┌─────────────────────────────────────────────────────┐   │
+│  ┌─────────────────────────────────────────────┐   │
 │  │           PostgreSQL (Render 提供)              │   │
-│  └─────────────────────────────────────────────────────┘   │
+│  └─────────────────────────────────────────────┘   │
 │                        ↓                                 │
-│  ┌─────────────────────────────────────────────────────┐   │
+│  ┌─────────────────────────────────────────────┐   │
 │  │              Django Backend (Daphne)               │   │
 │  │   • REST API                                      │   │
 │  │   • WebSocket                                     │   │
-│  └─────────────────────────────────────────────────────┘   │
+│  └─────────────────────────────────────────────┘   │
 │                        ↓                                 │
-│  ┌─────────────────────────────────────────────────────┐   │
+│  ┌─────────────────────────────────────────────┐   │
 │  │              RabbitMQ (Worker 服务)             │   │
 │  │   • 消息队列                                     │   │
-│  └─────────────────────────────────────────────────────┘   │
-└────────────────────┬────────────────────────────────────────┘
+│  └─────────────────────────────────────────────┘   │
+└────────────────────┬────────────────────────────────┘
                      │ HTTP + WebSocket
                      ▼
               ┌─────────────────────────────────────────────┐
@@ -32,285 +118,295 @@
               └─────────────────────────────────────────────┘
 ```
 
----
+### 部署步骤
 
-## 📋 部署前准备
+#### 一、后端部署
 
-### 1. 注册账号
+1. **打开 Render Dashboard**
+   访问：https://dashboard.render.com
 
-- **Render**: https://dashboard.render.com/
-- **GitHub**: 需要用于代码仓库
+2. **创建 Web Service**
+   - 点击右上角 **"+ New +"**
+   - 选择 **"Web Service"**
 
-### 2. 准备代码仓库
+3. **配置服务**
 
-将你的代码推送到 GitHub：
-- 仓库：`shuaihuidong/auto-test-platform`
-- 已包含 `backend/Dockerfile` 和 `frontend/` 目录
+   | 配置项 | 值/说明 |
+   |--------|----------|
+   | **Name** | `auto-test-backend` |
+   | **Region** | `Oregon (US West)` (保持默认) |
+   | **Branch** | `main` |
+   | **Runtime** | `Python 3` |
+   | **Root Directory** | `backend` ⚠️ 重要 |
+   | **Build Command** | `pip install -r requirements.txt && python manage.py collectstatic --noinput` |
+   | **Start Command** | `daphne -b 0.0.0.0 -p $PORT core.asgi:application` |
 
----
+4. **配置环境变量**
+   在 **Environment** 部分，添加以下变量：
 
-## 🐳 后端部署 (Render)
+   | Key | Value | 说明 |
+   |-----|-------|------|
+   | `DJANGO_SETTINGS_MODULE` | `core.settings` |
+   | `DJANGO_SECRET_KEY` | 随机字符串，如 `render_secret_2024_abc123` |
+   | `DEBUG` | `False` |
+   | `DJANGO_ALLOWED_HOSTS` | `*` |
+   | `CORS_ALLOWED_ORIGINS` | `https://auto-test-platform.onrender.com,https://auto-test-platform.vercel.app` |
 
-### 第一步：创建 Web Service
+5. **点击 Deploy**
+   等待 3-5 分钟部署完成
 
-1. **登录 Render**：https://dashboard.render.com/
+#### 二、RabbitMQ 部署
 
-2. **点击 "+ New +"** 按钮（右上角）
+1. **创建 Worker Service**
+   - 点击 **"+ New +"**
+   - 选择 **"Background Worker"**
 
-3. **选择 "Web Service"**
+2. **配置 RabbitMQ**
 
-4. **连接 GitHub 仓库**：
-   - 点击 "Connect GitHub"
-   - 授权 Render 访问你的仓库
-   - 搜索并选择 `shuaihuidong/auto-test-platform`
+   | 配置项 | 值/说明 |
+   |--------|----------|
+   | **Name** | `rabbitmq` |
+   | **Image** | `rabbitmq:3.12-management` |
+   | **Plan** | `Free` |
 
-5. **配置服务**：
+3. **点击 Deploy**
+   部署后会得到一个 URL，如：`https://rabbitmq-xxxx.onrender.com`
 
-| 配置项 | 值/说明 |
-|--------|----------|
-| **Name** | `auto-test-backend` |
-| **Region** | `Oregon (US West)` (保持默认) |
-| **Branch** | `main` |
-| **Runtime** | `Python 3` |
-| **Root Directory** | `backend` ⚠️ 重要！ |
-| **Build Command** | `pip install -r requirements.txt && python manage.py collectstatic --noinput` |
-| **Start Command** | `daphne -b 0.0.0.0 -p $PORT core.asgi:application` |
+#### 三、更新后端 RabbitMQ 配置
 
-6. **点击 "Create Web Service"**
+1. 回到后端服务
+2. 在 Environment 中添加：
 
----
+   | Key | Value |
+   |-----|-------|
+   | `RABBITMQ_HOST` | `rabbitmq-xxxx.onrender.com` (你的 RabbitMQ 服务 URL) |
+   | `RABBITMQ_PORT` | `5672` |
+   | `RABBITMQ_USER` | `guest` |
+   | `RABBITMQ_PASSWORD` | `guest` |
 
-### 第二步：配置环境变量
+3. 保存后会自动重启后端服务
 
-服务创建后，进入 **"Environment"** 标签页，点击 **"+ Add Variable"** 添加：
+#### 四、前端部署 (Vercel)
 
-| Key | Value | 说明 |
-|-----|-------|------|
-| `DJANGO_SETTINGS_MODULE` | `core.settings` | Django 配置模块 |
-| `DJANGO_SECRET_KEY` | 随机字符串，如 `render_secret_key_2024_abc123` | 密钥 |
-| `DEBUG` | `False` | 生产环境 |
-| `DJANGO_ALLOWED_HOSTS` | `*` | 允许的主机 |
-| `CORS_ALLOWED_ORIGINS` | `https://auto-test-platform.onrender.com` | CORS |
+1. **打开 Vercel**
+   访问：https://vercel.com/new
 
-**RabbitMQ 配置**（稍后部署完 RabbitMQ 后再添加）：
-| Key | Value |
-|-----|-------|
-| `RABBITMQ_HOST` | `your-rabbitmq-service.onrender.com` |
-| `RABBITMQ_PORT` | `5672` |
-| `RABBITMQ_USER` | `guest` |
-| `RABBITMQ_PASSWORD` | `guest` |
+2. **导入项目**
+   - 选择 **"Import Git Repository"**
+   - 搜索并选择 `auto-test-platform`
 
----
+3. **配置项目**
 
-### 第三步：自动部署
+   | 配置项 | 值 |
+   |--------|------|
+   | **Project Name** | `auto-test-platform` |
+   | **Framework Preset** | `Vite` |
+   | **Root Directory** | `frontend` |
+   | **Output Directory** | `dist` |
 
-保存环境变量后，Render 会自动：
-1. 检测到代码变更
-2. 开始构建 Docker 镜像
-3. 运行数据库迁移
-4. 启动 Daphne 服务
+4. **设置环境变量**
 
-**等待 3-5 分钟**，状态变为 **"Live"** ✅
+   | Key | Value |
+   |-----|-------|
+   | `VITE_API_BASE_URL` | `https://auto-test-backend.onrender.com/api` |
 
----
+5. **点击 Deploy**
 
-## 🐰 RabbitMQ 部署 (Render)
+### 获取部署地址
 
-### 第一步：创建 Worker 服务
+部署完成后，你会得到以下地址：
 
-1. 在 Render Dashboard 点击 **"+ New +"**
+| 服务 | URL 示例 | 用途 |
+|------|----------|------|
+| **后端 API** | `https://auto-test-backend.onrender.com/api` | 前端调用 |
+| **后端 WebSocket** | `wss://auto-test-backend.onrender.com/ws/` | 实时通信 |
+| **前端** | `https://auto-test-platform.vercel.app` | 用户访问 |
 
-2. **选择 "Background Worker"**
+### 验证部署
 
-3. **配置服务**：
+1. **测试 API**
+   访问 `https://auto-test-backend.onrender.com/api/`
+   应返回 `{"detail":"方法不允许"}` 或类似 JSON 响应
 
-| 配置项 | 值/说明 |
-|--------|----------|
-| **Name** | `rabbitmq` |
-| **Region** | 保持默认 |
-| **Runtime** | `Docker` |
-| **Image URL** | `rabbitmq:3.12-management` |
-| **Plan** | `Free` |
+2. **创建超级管理员**
+   - 在 Render Dashboard → 后端服务
+   - 点击 **"Shell"** 标签
+   - 运行：`python manage.py createsuperuser`
 
-4. **点击 "Create Background Worker"**
+3. **测试登录**
+   - 打开前端地址
+   - 使用刚创建的账号登录
 
----
-
-### 第二步：获取 RabbitMQ URL
-
-部署完成后：
-1. 点击 `rabbitmq` 服务
-2. 复制显示的 URL，例如：`https://rabbitmq-xxxx.onrender.com`
-
----
-
-### 第三步：更新后端环境变量
-
-回到后端服务的 **Environment** 标签，更新 RabbitMQ 配置：
-
-| Key | 新 Value |
-|-----|----------|
-| `RABBITMQ_HOST` | `rabbitmq-xxxx.onrender.com` |
-
-保存后会自动重启后端服务。
-
----
-
-## 🌐 前端部署 (Vercel)
-
-### 步骤 1：导入项目
-
-1. 登录 Vercel：https://vercel.com/new
-
-2. 点击 **"Add New Project"**
-
-3. 选择 **"Import Git Repository"**
-
-4. 选择 `shuaihuidong/auto-test-platform` 仓库
+4. **测试 WebSocket**
+   - 打开浏览器开发者工具（F12）
+   - Network 标签，过滤 `WS` 或 `WS`
+   - 刷新页面，查看是否有 WebSocket 连接
 
 ---
 
-### 步骤 2：配置项目
+## 方案三：Railway 免费云部署
 
-| 配置项 | 值 |
-|--------|------|
-| **Project Name** | `auto-test-platform` |
-| **Framework Preset** | `Vite` |
-| **Root Directory** | `frontend` |
-| **Output Directory** | `dist` |
+**注意**：Railway 现在需要信用卡验证才能注册。
 
----
-
-### 步骤 3：设置环境变量
-
-在 **"Environment Variables"** 部分添加：
-
-| Key | Value |
-|-----|-------|
-| `VITE_API_BASE_URL` | `https://auto-test-backend.onrender.com/api` |
-
----
-
-### 步骤 4：部署
-
-点击 **"Deploy"**，等待 1-2 分钟完成。
-
----
-
-## ⚙️ 执行机客户端配置
-
-部署完成后，给执行机用户的配置信息：
-
-| 配置项 | 值 |
-|--------|------|
-| **服务器地址** | `https://auto-test-backend.onrender.com` |
-| **RabbitMQ 主机** | `rabbitmq-xxxx.onrender.com` (或内部服务名) |
-| **RabbitMQ 端口** | `5672` |
-| **账号** | 在平台的「账号角色管理」中点击「RabbitMQ配置」获取 |
-
----
-
-## 💰 成本估算
-
-### Render 免费套餐
+### 免费套餐
 
 | 资源 | 免费额度 |
 |--------|----------|
-| 运行时间 | 750 小时/月（约 31 天连续运行） |
+| 运行时间 | $5/月（约 720 小时运行时间） |
 | RAM | 512MB |
 | CPU | 0.5 vCPU |
-| 持久存储 | 不包含（需用外部数据库） |
+| 存储 | 1GB |
 | 网络流量 | 100GB/月 |
 
-**限制说明**：
-- ⚠️ 服务 15 分钟无请求会自动休眠
-- ⚠️ 休眠后首次访问需要 30-60 秒冷启动
-- 💡 付费版（$7/月起）无休眠限制
+### 限制说明
 
-### Vercel 免费套餐
+💡 用完免费额度后会自动暂停
+💡 下月1号自动重置
+💡 生产环境建议升级付费版（$5/月起）
 
-| 资源 | 免费额度 |
-|--------|----------|
-| 构建时间 | 6000 分钟/月 |
-| 带宽 | 100GB/月 |
-| 部署 | 无限 |
+### 部署步骤
 
-**评估**：
-- ✅ 完全满足演示和开发使用
-- ⚠️ 生产环境建议升级付费版
+1. **打开 Railway**
+   访问：https://railway.app/
+
+2. **创建新项目**
+   - 选择 **"Deploy from Docker Compose"**
+   - 连接 GitHub 仓库
+
+3. **选择配置文件**
+   - 选择 `railway-compose.yml`
+   - 文件内容：
+
+```yaml
+version: "3.8"
+
+services:
+  # RabbitMQ 消息队列
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - railway-data:/var/lib/rabbitmq
+
+  # Django 后端
+  auto-test-backend:
+    image: python:3.11-slim
+    environment:
+      DJANGO_SETTINGS_MODULE: core.settings
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DEBUG: "False"
+      DATABASE_URL: ${Postgres.DATABASE_URL}
+      RABBITMQ_HOST: rabbitmq
+      DJANGO_ALLOWED_HOSTS: "*"
+      CORS_ALLOWED_ORIGINS: "https://auto-test-platform.vercel.app"
+```
+
+4. **配置环境变量**
+
+   | Key | Value |
+   |-----|-------|
+   | `DJANGO_SECRET_KEY` | 随机字符串 |
+   | `DEBUG` | `False` |
+   | `DJANGO_ALLOWED_HOSTS` | `*` |
+   | `CORS_ALLOWED_ORIGINS` | `https://auto-test-platform.vercel.app` |
+
+5. **点击 Deploy**
+   等待 3-5 分钟完成
+
+### 验证部署
+
+部署完成后，检查服务状态：
+- ✅ rabbitmq ● Running
+- ✅ auto-test-backend ● Running
+- ✅ postgresql ● Running
+
+获取后端 URL（点击服务查看）：
+- `https://auto-test-backend.up.railway.app`
 
 ---
 
-## 🔧 常见问题
+## 常见问题
 
-### Q: 超出免费额度怎么办？
+### Q: 免费额度用完了怎么办？
 
-**A**:
-- Render: 服务会暂停，下个月自动恢复
-- 建议升级付费版（$7/月起）
+**A:** 服务会自动暂停，下个月1号自动恢复。或升级付费版。
+
+---
 
 ### Q: WebSocket 连接不上？
 
-**A**: 检查：
+**A:** 检查以下几点：
 1. 后端使用 Daphne 启动（不是 runserver）
-2. Vercel 环境变量中 API 地址正确
-3. Render 防火墙允许 WebSocket
+2. 环境变量中 API 地址正确
+3. 平台防火墙允许 WebSocket 连接
 
-### Q: 数据保存在哪？
+---
 
-**A**:
-- PostgreSQL: 在 Render 云端
-- RabbitMQ: Worker 内存中（重启会丢失）
+### Q: 服务一直休眠怎么办？
+
+**A:**
+- **Render**: 升级付费版（$7/月起）
+- **Railway**: 无法避免，这是按月计费的
+
+---
+
+### Q: 数据存储在哪里？
+
+**A:**
+- **本地部署**: SQLite 文件在 `backend/db.sqlite3`
+- **Render**: PostgreSQL 在云端（自动创建）
+- **Railway**: PostgreSQL 在云端（自动创建）
+
+---
 
 ### Q: 如何创建超级管理员？
 
-**A**:
-1. Render Dashboard → 进入后端服务
-2. 点击 "Shell" 标签（终端图标）
-3. 运行：`python manage.py createsuperuser`
-
-### Q: 后端一直休眠怎么办？
-
-**A**:
-- 方法 1：升级付费版（$7/月起）
-- 方法 2：使用外部监控服务每 10 分钟 ping 一次
-- 方法 3：在服务配置中启用 "Health Check Path"
+**A:**
+- **本地部署**: `python manage.py createsuperuser`
+- **Render**: Dashboard → 服务 → Shell → 运行命令
+- **Railway**: Dashboard → 服务 → Shell → 运行命令
 
 ---
 
-## 📝 部署检查清单
+### Q: 执行机客户端如何配置？
 
-部署完成后，请确认：
+**A:** 给执行机用户的配置信息：
 
-- [ ] 后端 API 可以访问（`/api/` 路径返回数据）
-- [ ] WebSocket 可以连接（`/ws/` 路径可连接）
-- [ ] 前端可以正常加载
-- [ ] 可以创建用户并登录
-- [ ] 执行机可以连接
-- [ ] RabbitMQ 连接正常
-
----
-
-## 🚀 下一步
-
-部署成功后：
-
-1. **创建超级管理员账号**
-   - Render Console → Shell
-   - `python manage.py createsuperuser`
-
-2. **绑定自定义域名**（可选）
-   - Render: 服务设置 → Custom Domain
-   - Vercel: 项目设置 → Domains
-
-3. **配置执行机客户端**
-   - 下载 `executor-setup.exe`
-   - 使用云端配置信息安装
+| 配置项 | 值 |
+|--------|-----|
+| **服务器地址** | 你的部署 URL（如 `https://auto-test-backend.onrender.com`） |
+| **RabbitMQ 主机** | 同服务器地址或 RabbitMQ 服务地址 |
+| **RabbitMQ 端口** | `5672` |
+| **账号密码** | 在平台的「账号角色管理」中点击「RabbitMQ配置」获取 |
 
 ---
 
-## 📞 获取帮助
+## 部署方案对比
 
-- Render 文档: https://render.com/docs
-- Vercel 文档: https://vercel.com/docs
-- 项目 Issues: https://github.com/shuaihuidong/auto-test-platform/issues
+| 特性 | 本地部署 | Render | Railway |
+|------|----------|--------|--------|
+| **成本** | 免费 | 免费 | $5/月或免费 |
+| **难度** | ⭐ 简单 | ⭐⭐⭐ 中等 | ⭐⭐ 中等 |
+| **WebSocket** | ✅ 支持 | ✅ 支持 | ✅ 支持 |
+| **数据库** | SQLite | PostgreSQL(云) | PostgreSQL(云) |
+| **RabbitMQ** | Docker本地 | Worker服务 | Docker服务 |
+| **稳定性** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| **访问速度** | 最快 | 快 | 快 |
+| **休眠问题** | 无 | 15分钟无活动休眠 | 无 |
+| **推荐场景** | 本地开发 | 演示/生产 | 演示/测试 |
+
+**推荐排序**：本地 > Render > Railway
+
+---
+
+## 更新日志
+
+### v1.4.1 (2026-02-12) - 部署文档更新
+
+- 整合所有部署方案到统一文档
+- 添加详细的 Render 部署步骤
+- 添加常见问题解答
+- 删除冗余的部署文档
+- 优化部署方案对比表格
