@@ -79,7 +79,7 @@ const routes: RouteRecordRaw[] = [
         path: 'account-role',
         name: 'AccountRole',
         component: () => import('@/views/AccountRoleManage.vue'),
-        meta: { title: '账号角色管理', requiresAdmin: true }
+        meta: { title: '账号角色管理', requiresAuth: true }
       },
       {
         path: 'help',

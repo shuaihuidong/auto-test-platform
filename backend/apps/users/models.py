@@ -17,6 +17,8 @@ class User(AbstractUser):
     email = models.EmailField(unique=True, verbose_name='邮箱')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+    rabbitmq_password = models.CharField(max_length=100, null=True, blank=True, verbose_name='RabbitMQ密码')
+    rabbitmq_enabled = models.BooleanField(default=False, verbose_name='启用RabbitMQ')
 
     class Meta:
         db_table = 'users_user'

@@ -15,7 +15,7 @@
                   style="width: 200px"
                   @search="handleSearch"
                 />
-                <a-button type="primary" @click="showCreateUser">
+                <a-button type="primary" @click="showCreateUser" v-if="canDeleteUser">
                   <PlusOutlined /> 新建账号
                 </a-button>
               </a-space>
@@ -40,6 +40,12 @@
                 <template v-else-if="column.key === 'role'">
                   <a-tag :color="getRoleColor(record.role)">{{ record.role_display }}</a-tag>
                 </template>
+                <template v-else-if="column.key === 'rabbitmq'">
+                  <a-tag v-if="record.rabbitmq_enabled" color="green">
+                    <ApiOutlined /> 已启用
+                  </a-tag>
+                  <a-tag v-else color="default">未启用</a-tag>
+                </template>
                 <template v-else-if="column.key === 'status'">
                   <a-tag :color="record.is_active ? 'success' : 'default'">
                     {{ record.is_active ? '正常' : '禁用' }}
@@ -50,8 +56,26 @@
                 </template>
                 <template v-else-if="column.key === 'actions'">
                   <a-space>
-                    <a-button size="small" @click="showEditUser(record)">
+                    <a-button
+                      size="small"
+                      @click="showEditUser(record)"
+                      v-if="canEditUser(record)"
+                    >
                       <EditOutlined /> 编辑
+                    </a-button>
+                    <a-button
+                      size="small"
+                      @click="showRabbitMQConfig(record)"
+                      v-if="record.rabbitmq_enabled || isSuperAdmin"
+                    >
+                      <ApiOutlined /> RabbitMQ配置
+                    </a-button>
+                    <a-button
+                      size="small"
+                      @click="toggleRabbitMQ(record)"
+                      v-if="isSuperAdmin && record.id !== currentUserId"
+                    >
+                      <ApiOutlined /> {{ record.rabbitmq_enabled ? '禁用' : '启用' }}
                     </a-button>
                     <a-button size="small" @click="showChangeRole(record)" v-if="canChangeRole">
                       <UserSwitchOutlined /> 角色
@@ -210,13 +234,25 @@
             <div style="color: #999; font-size: 12px; margin-top: 4px">留空则不修改密码</div>
           </template>
         </a-form-item>
-        <a-form-item label="角色" required>
-          <a-select v-model:value="userForm.role" placeholder="请选择角色">
+        <a-form-item label="角色" required v-if="canDeleteUser">
+          <a-select v-model:value="userForm.role" placeholder="请选择角色" :disabled="!canChangeRole">
             <a-select-option value="super_admin">超级管理员</a-select-option>
             <a-select-option value="admin">管理员</a-select-option>
             <a-select-option value="tester">测试人员</a-select-option>
             <a-select-option value="guest">访客</a-select-option>
           </a-select>
+        </a-form-item>
+        <a-form-item label="RabbitMQ" v-if="isSuperAdmin">
+          <a-switch
+            v-model:checked="userForm.rabbitmq_enabled"
+            checked-children="启用"
+            un-checked-children="禁用"
+          />
+          <template #extra>
+            <span style="color: #999; font-size: 12px;">
+              启用后将为该用户自动创建 RabbitMQ 账号，用于执行机客户端连接
+            </span>
+          </template>
         </a-form-item>
       </a-form>
     </a-modal>
@@ -412,6 +448,32 @@
         </a-button>
       </template>
     </a-modal>
+
+    <!-- 查看 RabbitMQ 配置对话框 -->
+    <a-modal
+      v-model:open="rabbitMQConfigVisible"
+      title="RabbitMQ 配置信息"
+      width="400px"
+      :footer="null"
+    >
+      <a-descriptions bordered :column="1" size="small">
+        <a-descriptions-item label="用户名">
+          <a-typography-text copyable>{{ rabbitMQConfig.username }}</a-typography-text>
+        </a-descriptions-item>
+        <a-descriptions-item label="密码">
+          <a-typography-text copyable>{{ rabbitMQConfig.password }}</a-typography-text>
+        </a-descriptions-item>
+        <a-descriptions-item label="主机地址">
+          <a-typography-text copyable>{{ rabbitMQConfig.host }}</a-typography-text>
+        </a-descriptions-item>
+        <a-descriptions-item label="端口">
+          <a-typography-text>{{ rabbitMQConfig.port }}</a-typography-text>
+        </a-descriptions-item>
+      </a-descriptions>
+      <a-button type="primary" block style="margin-top: 16px;" @click="rabbitMQConfigVisible = false">
+        关闭
+      </a-button>
+    </a-modal>
   </div>
 </template>
 
@@ -427,7 +489,8 @@ import {
   SafetyOutlined,
   KeyOutlined,
   UserOutlined,
-  SyncOutlined
+  SyncOutlined,
+  ApiOutlined
 } from '@ant-design/icons-vue'
 import { userApi } from '@/api/user'
 import { roleApi } from '@/api/role'
@@ -436,6 +499,8 @@ import { useUserStore } from '@/store/user'
 import axios from 'axios'
 
 const userStore = useUserStore()
+
+const currentUserId = computed(() => userStore.user?.id)
 
 const activeTab = ref('accounts')
 const searchText = ref('')
@@ -451,7 +516,8 @@ const userForm = ref({
   username: '',
   email: '',
   password: '',
-  role: 'guest'
+  role: 'guest',
+  rabbitmq_enabled: false
 })
 
 const roleModalVisible = ref(false)
@@ -492,6 +558,15 @@ const rabbitMQPasswordForm = ref({
 const rabbitMQPasswordUser = ref<any>(null)
 const rabbitMQPasswordUpdating = ref(false)
 
+// RabbitMQ 配置相关
+const rabbitMQConfigVisible = ref(false)
+const rabbitMQConfig = ref({
+  username: '',
+  password: '',
+  host: '',
+  port: 5672
+})
+
 const rabbitMQUserColumns = [
   { title: '用户名', key: 'name', width: 200 },
   { title: '标签', key: 'tags', width: 150 },
@@ -502,9 +577,10 @@ const userColumns = [
   { title: '用户名', key: 'username', width: 200 },
   { title: '邮箱', key: 'email', dataIndex: 'email' },
   { title: '角色', key: 'role', width: 120 },
+  { title: 'RabbitMQ', key: 'rabbitmq', width: 100 },
   { title: '状态', key: 'status', width: 100 },
   { title: '创建时间', key: 'created_at', width: 180 },
-  { title: '操作', key: 'actions', width: 300, fixed: 'right' }
+  { title: '操作', key: 'actions', width: 350, fixed: 'right' }
 ]
 
 const filteredUsers = computed(() => {
@@ -530,6 +606,12 @@ const canResetPassword = computed(() => {
 const isSuperAdmin = computed(() => {
   return userStore.user?.role === 'super_admin'
 })
+
+// 是否可以编辑用户（管理员可以编辑所有用户，普通用户只能编辑自己）
+function canEditUser(user: any) {
+  const isAdmin = userStore.user?.role === 'admin' || userStore.user?.role === 'super_admin'
+  return isAdmin || user.id === currentUserId.value
+}
 
 async function loadUsers() {
   userLoading.value = true
@@ -564,7 +646,8 @@ function showCreateUser() {
     username: '',
     email: '',
     password: '',
-    role: 'guest'
+    role: 'guest',
+    rabbitmq_enabled: false
   }
   userModalVisible.value = true
 }
@@ -577,7 +660,8 @@ function showEditUser(user: any) {
     username: user.username,
     email: user.email,
     password: '',
-    role: user.role
+    role: user.role,
+    rabbitmq_enabled: user.rabbitmq_enabled || false
   }
   userModalVisible.value = true
 }
@@ -899,6 +983,54 @@ async function handleChangeRabbitMQPassword() {
   } finally {
     rabbitMQPasswordUpdating.value = false
   }
+}
+
+// 显示 RabbitMQ 配置
+async function showRabbitMQConfig(user: any) {
+  if (!user.rabbitmq_enabled) {
+    message.warning('该用户未启用 RabbitMQ 功能')
+    return
+  }
+
+  try {
+    const response = await axios.get(`/api/users/${user.id}/get_rabbitmq_config/`)
+    rabbitMQConfig.value = response.data
+    rabbitMQConfigVisible.value = true
+  } catch (error: any) {
+    if (error.response?.data?.error) {
+      message.error(error.response.data.error)
+    } else {
+      message.error('获取 RabbitMQ 配置失败')
+    }
+  }
+}
+
+// 开关 RabbitMQ 功能
+async function toggleRabbitMQ(user: any) {
+  const action = user.rabbitmq_enabled ? '禁用' : '启用'
+  const content = user.rabbitmq_enabled
+    ? '禁用后，该用户将无法使用 RabbitMQ 功能，执行机客户端将无法连接。确定要禁用吗？'
+    : '启用后，系统将自动为该用户创建 RabbitMQ 账号。确定要启用吗？'
+
+  Modal.confirm({
+    title: `${action} RabbitMQ 功能`,
+    content,
+    onOk: async () => {
+      try {
+        await axios.post(`/api/users/${user.id}/toggle_rabbitmq/`, {
+          enable: !user.rabbitmq_enabled
+        })
+        message.success(`RabbitMQ 功能已${action}`)
+        loadUsers()
+      } catch (error: any) {
+        if (error.response?.data?.error) {
+          message.error(error.response.data.error)
+        } else {
+          message.error(`${action}失败，请检查网络连接`)
+        }
+      }
+    }
+  })
 }
 
 onMounted(() => {

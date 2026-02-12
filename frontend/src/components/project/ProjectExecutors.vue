@@ -59,7 +59,11 @@
       v-model:open="bindModalVisible"
       title="绑定执行机"
       width="600px"
+      :ok-button-props="{ loading: bindLoading }"
+      :mask-closable="true"
+      :closable="true"
       @ok="handleBindOk"
+      @cancel="handleBindCancel"
     >
       <a-form layout="vertical">
         <a-form-item label="选择执行机">
@@ -107,6 +111,7 @@ const executors = ref<Executor[]>([])
 const availableExecutors = ref<Executor[]>([])
 
 const bindModalVisible = ref(false)
+const bindLoading = ref(false)
 const selectedExecutorIds = ref<number[]>([])
 
 const columns = [
@@ -123,7 +128,7 @@ async function loadExecutors() {
   try {
     const data = await executorApi.getList()
     // 过滤出绑定到此项目的执行机
-    executors.value = data.filter(e =>
+    executors.value = (data.results || data).filter((e: any) =>
       e.bound_projects.some((p: any) => p.id === props.projectId)
     )
   } catch (error) {
@@ -135,15 +140,17 @@ async function loadExecutors() {
 
 async function loadAvailableExecutors() {
   try {
-    const data = await executorApi.getList({ scope: 'global', is_enabled: true })
-    availableExecutors.value = data
+    const response = await executorApi.getList({ scope: 'global', is_enabled: true })
+    // API 返回的是 { results: [], count: n } 格式
+    availableExecutors.value = response.results || response || []
   } catch (error) {
-    // 错误已由拦截器处理
+    availableExecutors.value = []
   }
 }
 
 function showBindModal() {
   selectedExecutorIds.value = []
+  bindLoading.value = false
   loadAvailableExecutors()
   bindModalVisible.value = true
 }
@@ -151,10 +158,10 @@ function showBindModal() {
 async function handleBindOk() {
   if (selectedExecutorIds.value.length === 0) {
     message.error('请选择执行机')
-    return
+    return false  // 阻止弹窗关闭
   }
 
-  loading.value = true
+  bindLoading.value = true
   try {
     // 批量绑定执行机到项目
     for (const executorId of selectedExecutorIds.value) {
@@ -170,9 +177,15 @@ async function handleBindOk() {
     loadExecutors()
   } catch (error) {
     // 错误已由拦截器处理
+    return false  // 阻止弹窗关闭
   } finally {
-    loading.value = false
+    bindLoading.value = false
   }
+}
+
+function handleBindCancel() {
+  bindModalVisible.value = false
+  selectedExecutorIds.value = []
 }
 
 async function unbind(record: Executor) {

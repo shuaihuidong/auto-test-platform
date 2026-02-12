@@ -35,7 +35,7 @@
           <template #icon><PlayCircleOutlined /></template>
           执行记录
         </a-menu-item>
-        <a-menu-item key="account-role" @click="$router.push('/account-role')" v-if="isAdmin">
+        <a-menu-item key="account-role" @click="$router.push('/account-role')" v-if="isTesterOrAdmin">
           <template #icon><TeamOutlined /></template>
           账号角色管理
         </a-menu-item>
@@ -127,6 +127,11 @@ const passwordForm = ref({
 })
 
 const isAdmin = computed(() => userStore.user?.role === 'admin' || userStore.user?.role === 'super_admin')
+const isTesterOrAdmin = computed(() => {
+  const role = userStore.user?.role || 'guest'
+  // tester, admin, super_admin 都可以访问
+  return ['tester', 'admin', 'super_admin'].includes(role)
+})
 
 // 监听路由变化，更新菜单选中状态
 watch(

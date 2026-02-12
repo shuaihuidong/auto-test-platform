@@ -175,10 +175,17 @@
                     <a-card size="small" style="margin-top: 8px; background: #f5f5f5;">
                       <p><strong>服务器地址：</strong></p>
                       <ul>
-                        <li>如果服务器和你的电脑在同一台电脑上，填写：<code>http://127.0.0.1:8000</code></li>
-                        <li>如果服务器在局域网其他电脑上，填写：<code>http://192.168.x.x:8000</code>（具体IP问管理员）</li>
+                        <li>填写服务器的实际 IP 地址（如：<code>http://192.168.x.x:8000</code>）</li>
                         <li>如果是互联网服务器，填写管理员给的域名或IP</li>
                       </ul>
+                      <a-alert type="info" show-icon style="margin-top: 12px;">
+                        <template #message>
+                          <span>💡 如何获取服务器地址？</span>
+                        </template>
+                        <template #description>
+                          <p>登录平台后，在浏览器地址栏查看访问地址（如：<code>http://192.168.31.42:3000</code>），将端口号 <code>3000</code> 改为 <code>8000</code> 即可（例如：<code>http://192.168.31.42:8000</code>）</p>
+                        </template>
+                      </a-alert>
                     </a-card>
                     <a-alert type="warning" show-icon message="注意：必须是 http:// 开头，端口是 8000" style="margin-top: 8px;" />
                   </div>
@@ -192,10 +199,25 @@
                     <a-card size="small" style="margin-top: 8px; background: #f5f5f5;">
                       <p><strong>RabbitMQ 地址：</strong></p>
                       <ul>
-                        <li><strong>同电脑安装</strong>：填写 <code>127.0.0.1</code></li>
-                        <li><strong>局域网安装</strong>：填写服务器的实际 IP 地址（如 <code>192.168.1.100</code>）</li>
+                        <li>填写服务器的实际 IP 地址（如：<code>192.168.1.100</code>）</li>
                         <li><strong>端口</strong>：保持默认 <code>5672</code></li>
                       </ul>
+                      <a-alert type="info" show-icon style="margin-top: 12px;">
+                        <template #message>
+                          <span>💡 如何获取 RabbitMQ 配置信息？</span>
+                        </template>
+                        <template #description>
+                          <p><strong>推荐方式：使用平台用户配置</strong></p>
+                          <ol>
+                            <li>登录平台，点击顶部菜单的「账号角色管理」</li>
+                            <li>在用户列表中找到你的账号</li>
+                            <li>点击该账号对应的「RabbitMQ配置」按钮</li>
+                            <li>在弹出的对话框中会显示：用户名、密码、主机地址、端口</li>
+                            <li>点击复制按钮或手动复制这些信息</li>
+                          </ol>
+                          <p style="margin-top: 8px;"><strong>注意：只有管理员启用了 RabbitMQ 功能的用户才能看到配置信息</strong></p>
+                        </template>
+                      </a-alert>
                     </a-card>
 
                     <p style="margin-top: 16px;"><strong>账号设置：</strong></p>
@@ -204,7 +226,15 @@
                         <span>远程执行机需要使用专用账号</span>
                       </template>
                       <template #description>
-                        <p>执行机和服务器在不同电脑上，需要使用专用 RabbitMQ 账号：</p>
+                        <p><strong>方式一：使用平台用户配置（推荐）</strong></p>
+                        <ol style="margin-bottom: 0;">
+                          <li>登录平台，进入「账号角色管理」</li>
+                          <li>找到你的账号，点击「RabbitMQ配置」按钮</li>
+                          <li>在弹出的对话框中查看配置信息（用户名、密码、主机地址、端口）</li>
+                          <li>复制这些信息到执行机配置向导</li>
+                        </ol>
+                        <p style="margin-top: 12px;"><strong>方式二：管理员创建独立账号</strong></p>
+                        <p>如果管理员没有为你启用 RabbitMQ，可以让管理员创建独立账号：</p>
                         <ol style="margin-bottom: 0;">
                           <li>联系超级管理员在平台中创建账号</li>
                           <li>管理员登录平台 → 账号角色管理 → 角色管理</li>
@@ -1054,6 +1084,7 @@ import { ref } from 'vue'
 import {
   RocketOutlined,
   DesktopOutlined,
+  ApiOutlined,
   CodeOutlined,
   DatabaseOutlined,
   ScheduleOutlined,

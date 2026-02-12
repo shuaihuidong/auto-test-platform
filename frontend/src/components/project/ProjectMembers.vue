@@ -117,6 +117,7 @@ import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
+import { userApi } from '@/api/user'
 
 interface Props {
   projectId: number
@@ -160,14 +161,19 @@ async function loadMembers() {
 
 async function loadAvailableUsers() {
   try {
-    // TODO: 调用获取可用用户列表API
-    // const data = await userApi.getList()
-    // 排除已经是成员的用户
-    // availableUsers.value = data.filter(u => !members.value.some(m => m.user.id === u.id))
-
-    availableUsers.value = []
+    const data = await userApi.getList()
+    // 转换为下拉框需要的格式
+    const memberUserIds = members.value.map(m => m.user_id || m.id)
+    availableUsers.value = (data.results || [])
+      .filter((u: any) => !memberUserIds.includes(u.id))
+      .map((u: any) => ({
+        label: u.username,
+        value: u.id,
+        email: u.email,
+        username: u.username
+      }))
   } catch (error) {
-    // 错误已由拦截器处理
+    availableUsers.value = []
   }
 }
 
