@@ -1,0 +1,13 @@
+# Railway 部署配置
+# 自动化测试管理平台 - Railway.app 部署文件
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "backend/Dockerfile"
+
+[deploy]
+startCommand = "daphne -b 0.0.0.0 -p $PORT core.asgi:application"
+healthcheckPath = "/api/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
