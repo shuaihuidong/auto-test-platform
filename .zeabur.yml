@@ -3,21 +3,7 @@
 
 # 前端服务配置
 services:
-  # ==================== 前端服务 ====================
-  - name: frontend
-    type: prebuilt
-    path: ./frontend
-    dockerfile: ./frontend/Dockerfile
-    env:
-      - name: NODE_ENV
-        value: production
-      - name: BACKEND_URL
-        value: ${backend.url}
-    ports:
-      - port: 80
-        public: true
-
-  # ==================== 后端服务 ====================
+  # ==================== 后端服务（先部署） ====================
   - name: backend
     type: prebuilt
     path: ./backend
@@ -44,8 +30,10 @@ services:
     ports:
       - port: 8000
         public: true
+    # 禁用健康检查，给 Django 足够启动时间
+    healthCheckCacheSec: 300
 
-# ==================== RabbitMQ 消息队列服务 ====================
+  # ==================== RabbitMQ 消息队列服务 ====================
   - name: rabbitmq
     image: rabbitmq:3.12-management
     env:
@@ -58,9 +46,20 @@ services:
         public: false
       - port: 15672
         public: true
-    volumes:
-      - source: rabbitmq_data
-        target: /var/lib/rabbitmq
+
+  # ==================== 前端服务 ====================
+  - name: frontend
+    type: prebuilt
+    path: ./frontend
+    dockerfile: ./frontend/Dockerfile
+    env:
+      - name: NODE_ENV
+        value: production
+      - name: BACKEND_URL
+        value: ${backend.url}
+    ports:
+      - port: 80
+        public: true
 
 # ==================== 数据卷 ====================
 volumes:
