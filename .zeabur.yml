@@ -1,0 +1,46 @@
+# Zeabur 部署配置文件
+
+# 将此文件放在项目根目录
+
+# 前端服务配置
+frontend:
+  type: prebuilt
+  path: ./frontend
+  dockerfile: ./frontend/Dockerfile
+  env:
+    - NODE_ENV=production
+    - BACKEND_URL=${BACKEND_URL}
+  ports:
+    - port: 80
+      public: true
+
+# 后端服务配置
+backend:
+  type: prebuilt
+  path: ./backend
+  dockerfile: ./backend/Dockerfile
+  env:
+    - DJANGO_SETTINGS_MODULE=core.settings
+    - SECRET_KEY=${SECRET_KEY}
+    - ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
+    - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@${RABBITMQ_HOST:-rabbitmq}:5672/
+  ports:
+    - port: 8000
+      public: true
+  # 明确指定启动命令，确保 Zeabur 正确识别
+  startCommand: |
+    python manage.py migrate &&
+    daphne -b 0.0.0.0 -p 8000 core.asgi:application
+# RabbitMQ 消息队列服务
+rabbitmq:
+  image: rabbitmq:3.12-management
+  env:
+    - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER:-guest}
+    - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS:-guest}
+  ports:
+    - port: 5672
+      public: false
+    - port: 15672
+      public: true
+  volumes:
+    - rabbitmq_data:/var/lib/rabbitmq
