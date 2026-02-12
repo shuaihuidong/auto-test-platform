@@ -1,4 +1,4 @@
-# Django 后端 Dockerfile for Railway
+# Django 后端 Dockerfile for Zeabur
 
 FROM python:3.11-slim
 
@@ -27,11 +27,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制项目文件
 COPY . .
 
-# 收集静态文件
-RUN python manage.py collectstatic --noinput --settings=core.settings
+# 创建必要的目录
+RUN mkdir -p staticfiles media reports
 
 # 暴露端口
 EXPOSE 8000
 
-# 启动命令
-CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "core.asgi:application"]
+# 启动脚本 - 运行迁移和启动服务
+CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && daphne -b 0.0.0.0 -p 8000 core.asgi:application"]
