@@ -31,7 +31,8 @@ RUN mkdir -p staticfiles media reports
 # 暴露端口
 EXPOSE 8000
 
-# 启动命令 - 先运行迁移，再启动服务
-CMD python manage.py migrate --noinput && \
-    python manage.py collectstatic --noinput && \
-    daphne -b 0.0.0.0 -p 8000 core.asgi:application
+# 启动脚本
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+CMD ["/app/start.sh"]
