@@ -195,7 +195,8 @@ class TaskQueueSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'execution', 'executor', 'executor_info', 'status', 'status_display',
             'priority', 'priority_display', 'script_data', 'error_message',
-            'assigned_at', 'started_at', 'completed_at', 'duration', 'created_at'
+            'assigned_at', 'started_at', 'completed_at', 'duration', 'script_name',
+            'project_name', 'created_at'
         ]
         read_only_fields = ['created_at']
 
