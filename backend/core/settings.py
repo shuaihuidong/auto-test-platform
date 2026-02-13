@@ -158,3 +158,12 @@ RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
 RABBITMQ_USER = os.getenv('RABBITMQ_USER', 'guest')
 RABBITMQ_PASSWORD = os.getenv('RABBITMQ_PASSWORD', 'guest')
 RABBITMQ_VHOST = os.getenv('RABBITMQ_VHOST', '/')
+
+# Session settings - 使用文件存储以避免容器重启导致session丢失
+SESSION_ENGINE = 'django.contrib.sessions.backends.file'
+SESSION_FILE_PATH = BASE_DIR / 'sessions'
+os.makedirs(SESSION_FILE_PATH, exist_ok=True)
+SESSION_COOKIE_AGE = 86400  # 24小时
+SESSION_SAVE_EVERY_REQUEST = True  # 每次请求都保存session
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_HTTPONLY = True

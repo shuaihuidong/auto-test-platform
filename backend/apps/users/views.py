@@ -304,23 +304,38 @@ class UserViewSet(viewsets.ModelViewSet):
             from django.conf import settings
 
             # 获取 RabbitMQ 服务器地址
-            rabbitmq_host = settings.RABBITMQ_HOST
+            # RABBITMQ_HOST 是Docker内部通信地址（如'rabbitmq'服务名）
+            # 客户端需要的是外部可访问的地址，优先使用 RABBITMQ_PUBLIC_HOST
+            rabbitmq_host = os.getenv('RABBITMQ_PUBLIC_HOST', settings.RABBITMQ_HOST)
 
-            # 如果配置的是本地地址，则获取本机实际 IP
-            if rabbitmq_host in ['127.0.0.1', 'localhost']:
+            # 如果RABBITMQ_HOST是Docker服务名且没有配置PUBLIC_HOST，尝试获取实际IP
+            if rabbitmq_host == settings.RABBITMQ_HOST and settings.RABBITMQ_HOST not in ['127.0.0.1', 'localhost']:
+                # Docker服务名情况，尝试获取容器主机IP或使用配置的公网IP
+                public_host = os.getenv('RABBITMQ_PUBLIC_HOST')
+                if public_host:
+                    rabbitmq_host = public_host
+                else:
+                    # 尝试获取主机IP
+                    try:
+                        hostname = socket.gethostname()
+                        rabbitmq_host = socket.gethostbyname(hostname)
+                    except Exception:
+                        # 使用默认值，前端需要手动配置
+                        rabbitmq_host = settings.RABBITMQ_HOST
+            elif rabbitmq_host in ['127.0.0.1', 'localhost']:
+                # 本地地址情况，获取本机实际IP
                 try:
-                    # 尝试获取本机 IP
                     hostname = socket.gethostname()
                     rabbitmq_host = socket.gethostbyname(hostname)
                 except Exception:
-                    # 获取失败，使用配置值
                     rabbitmq_host = settings.RABBITMQ_HOST
 
             return Response({
                 'username': user.username,
                 'password': user.rabbitmq_password,
                 'host': rabbitmq_host,
-                'port': settings.RABBITMQ_PORT
+                'port': settings.RABBITMQ_PORT,
+                'vhost': settings.RABBITMQ_VHOST
             })
 
         except Exception as e:
