@@ -3,10 +3,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.http import HttpResponse
+from django.db.models import Q
 from django_filters.rest_framework import DjangoFilterBackend
 from django_filters import FilterSet
 from .models import Script, DataSource
 from .serializers import ScriptSerializer, ScriptDetailSerializer, DataSourceSerializer
+from apps.projects.models import ProjectMember, Project
 import json
 import yaml
 
@@ -54,20 +56,28 @@ class ScriptViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(project=project_param)
             return queryset
 
-        # 其他用户只能看到自己创建的项目的脚本
+        # 获取用户有权限访问的项目：自己创建的 + 作为成员加入的
         user_created_projects = user.created_projects.all()
+        member_project_ids = ProjectMember.objects.filter(
+            user=user
+        ).values_list('project_id', flat=True)
 
-        # 处理project参数，只能看到自己创建的项目
+        # 合并有权限的项目
+        accessible_projects = user_created_projects | Project.objects.filter(
+            id__in=member_project_ids
+        )
+
+        # 处理project参数
         project_param = self.request.query_params.get('project')
         if project_param is not None and str(project_param) != '0':
             # 检查用户是否有权限访问该项目
-            if not user_created_projects.filter(id=project_param).exists():
+            if not accessible_projects.filter(id=project_param).exists():
                 # 用户没有权限访问该项目，返回空查询集
                 return Script.objects.none()
             queryset = queryset.filter(project=project_param)
         else:
-            # 没有指定项目，只返回用户创建的项目的脚本
-            queryset = queryset.filter(project__in=user_created_projects)
+            # 没有指定项目，返回用户有权限访问的所有项目的脚本
+            queryset = queryset.filter(project__in=accessible_projects)
 
         return queryset
 

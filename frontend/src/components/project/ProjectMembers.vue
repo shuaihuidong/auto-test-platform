@@ -118,6 +118,7 @@ import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { userApi } from '@/api/user'
+import { projectApi, type ProjectMember } from '@/api/project'
 
 interface Props {
   projectId: number
@@ -126,7 +127,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const loading = ref(false)
-const members = ref<any[]>([])
+const members = ref<ProjectMember[]>([])
 const availableUsers = ref<any[]>([])
 
 const addModalVisible = ref(false)
@@ -134,7 +135,7 @@ const roleModalVisible = ref(false)
 const selectedUserId = ref<number>()
 const selectedRole = ref('member')
 const newRole = ref('member')
-const editingMemberId = ref<number>()
+const editingMemberId = ref<string | number>()
 
 const columns = [
   { title: '用户', key: 'user', ellipsis: true },
@@ -146,12 +147,8 @@ const columns = [
 async function loadMembers() {
   loading.value = true
   try {
-    // TODO: 调用项目成员API
-    // const data = await projectApi.getMembers(props.projectId)
-    // members.value = data
-
-    // 临时模拟数据
-    members.value = []
+    const data = await projectApi.getMembers(props.projectId)
+    members.value = data
   } catch (error) {
     // 错误已由拦截器处理
   } finally {
@@ -192,8 +189,10 @@ async function handleAddOk() {
 
   loading.value = true
   try {
-    // TODO: 调用添加成员API
-    await new Promise(resolve => setTimeout(resolve, 500))
+    await projectApi.addMember(props.projectId, {
+      user: selectedUserId.value,
+      role: selectedRole.value
+    })
     message.success('添加成功')
     addModalVisible.value = false
     loadMembers()
@@ -204,17 +203,21 @@ async function handleAddOk() {
   }
 }
 
-function changeRole(record: any) {
+function changeRole(record: ProjectMember) {
   editingMemberId.value = record.id
   newRole.value = record.role
   roleModalVisible.value = true
 }
 
 async function handleRoleOk() {
+  if (!editingMemberId.value) {
+    message.error('无效的成员ID')
+    return
+  }
+
   loading.value = true
   try {
-    // TODO: 调用变更角色API
-    await new Promise(resolve => setTimeout(resolve, 500))
+    await projectApi.changeMemberRole(props.projectId, editingMemberId.value, newRole.value)
     message.success('角色变更成功')
     roleModalVisible.value = false
     loadMembers()
@@ -225,10 +228,9 @@ async function handleRoleOk() {
   }
 }
 
-async function removeMember(record: any) {
+async function removeMember(record: ProjectMember) {
   try {
-    // TODO: 调用移除成员API
-    await new Promise(resolve => setTimeout(resolve, 500))
+    await projectApi.removeMember(props.projectId, record.id)
     message.success('移除成功')
     loadMembers()
   } catch (error) {
