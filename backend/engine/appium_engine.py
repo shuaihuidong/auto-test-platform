@@ -144,6 +144,10 @@ class AppiumEngine(TestEngine):
         locator_type = locator.get('type', 'id')
         value = locator.get('value', '')
 
+        # 验证 value 不为空
+        if not value or not value.strip():
+            raise ValueError(f"定位器值不能为空 (type: {locator_type})")
+
         if locator_type == 'id':
             by = AppiumBy.ID
         elif locator_type == 'xpath':

@@ -137,6 +137,10 @@ class PlaywrightEngine(TestEngine):
         locator_type = locator.get('type', 'xpath')
         value = locator.get('value', '')
 
+        # 验证 value 不为空
+        if not value or not value.strip():
+            raise ValueError(f"定位器值不能为空 (type: {locator_type})")
+
         if locator_type == 'xpath':
             return self.page.locator(f'xpath={value}')
         elif locator_type == 'css':
