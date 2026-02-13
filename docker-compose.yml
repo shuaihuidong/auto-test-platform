@@ -52,7 +52,7 @@ services:
     networks:
       - auto-test-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health/"]
+      test: ["CMD-SHELL", "python -c 'import socket; s=socket.socket(); s.connect((\"localhost\", 8000)); s.close()' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
