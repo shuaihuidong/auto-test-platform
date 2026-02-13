@@ -63,7 +63,7 @@ services:
       retries: 3
       start_period: 40s
 
-  # Vue 前端
+  # Vue 前端 (HTTPS自动构建)
   frontend:
     build:
       context: ./frontend
@@ -74,9 +74,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    volumes:
-      - ./ssl/cert.crt:/etc/nginx/ssl/cert.crt:ro
-      - ./ssl/cert.key:/etc/nginx/ssl/cert.key:ro
     depends_on:
       - backend
     restart: unless-stopped
