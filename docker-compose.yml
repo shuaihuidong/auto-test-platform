@@ -6,8 +6,8 @@ services:
     image: rabbitmq:3.12-management
     container_name: auto-test-rabbitmq
     ports:
-      - "5672:5672"   # AMQP 端口
-      - "15672:15672" # 管理界面端口
+      - "5672:5672"
+      - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -19,7 +19,75 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - auto-test-network
+
+  # Django 后端
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: auto-test-backend
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-django-insecure-production-key-change-this}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+      DEBUG: ${DEBUG:-False}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,http://localhost:80,https://localhost,https://43.136.56.242}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+      PORT: 8000
+    volumes:
+      - backend_static:/app/staticfiles
+      - backend_media:/app/media
+      - backend_reports:/app/reports
+      - backend_db:/app/db
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - auto-test-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Vue 前端
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: auto-test-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./ssl/cert.crt:/etc/nginx/ssl/cert.crt:ro
+      - ./ssl/cert.key:/etc/nginx/ssl/cert.key:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - auto-test-network
 
 volumes:
   rabbitmq_data:
     driver: local
+  backend_static:
+    driver: local
+  backend_media:
+    driver: local
+  backend_reports:
+    driver: local
+  backend_db:
+    driver: local
+
+networks:
+  auto-test-network:
+    driver: bridge
