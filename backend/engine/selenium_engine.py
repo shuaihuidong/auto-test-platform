@@ -144,6 +144,10 @@ class SeleniumEngine(TestEngine):
         by_type = self._get_by_type(locator.get('type', 'xpath'))
         value = locator.get('value', '')
 
+        # 验证 value 不为空
+        if not value or not value.strip():
+            raise ValueError(f"定位器值不能为空 (type: {locator.get('type', 'xpath')})")
+
         wait = WebDriverWait(self.driver, self.timeout)
         return wait.until(EC.presence_of_element_located((by_type, value)))
 
