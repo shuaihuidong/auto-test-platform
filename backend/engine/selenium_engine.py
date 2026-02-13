@@ -359,7 +359,11 @@ class SeleniumEngine(TestEngine):
                 return {'success': False, 'error': '缺少locator参数'}
 
             by_type = self._get_by_type(locator.get('type', 'xpath'))
-            value = locator.get('value')
+            value = locator.get('value', '')
+            # 验证 value 不为空
+            if not value or not value.strip():
+                return {'success': False, 'error': '等待元素的定位器值不能为空'}
+
             WebDriverWait(self.driver, duration).until(
                 EC.presence_of_element_located((by_type, value))
             )
