@@ -577,6 +577,13 @@ class ScriptExecutor:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--ignore-certificate-errors")
+
+        # 每次启动使用新的临时用户数据目录，清除缓存
+        import tempfile
+        import os
+        user_data_dir = tempfile.mkdtemp(prefix='chrome_profile_')
+        options.add_argument(f"--user-data-dir={user_data_dir}")
 
         if service:
             return webdriver.Chrome(service=service, options=options)
