@@ -8,6 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 import secrets
 import socket
+import os
 from .serializers import (
     UserSerializer,
     UserCreateSerializer,
