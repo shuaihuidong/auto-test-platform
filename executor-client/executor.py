@@ -488,6 +488,10 @@ class StepExecutor:
         locator_type = locator.get("type", "xpath")
         locator_value = locator.get("value", "")
 
+        # 验证 value 不为空
+        if not locator_value or not locator_value.strip():
+            raise ValueError(f"定位器值不能为空 (type: {locator_type})")
+
         type_map = {
             "xpath": By.XPATH,
             "css": By.CSS_SELECTOR,
