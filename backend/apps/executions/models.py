@@ -130,6 +130,10 @@ class Execution(models.Model):
         if self.execution_type == 'plan':
             # 计划执行：返回脚本总数
             return self.children.count()
+        # 对于脚本执行，返回脚本中定义的总步骤数，而不是实际执行的步骤数
+        if self.script and self.script.steps:
+            return len(self.script.steps)
+        # 否则返回实际执行的步骤数
         return self.result.get('total', 0) if self.result else 0
 
     def save(self, *args, **kwargs):

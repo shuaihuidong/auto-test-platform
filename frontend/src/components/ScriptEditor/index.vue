@@ -121,6 +121,7 @@
             item-key="id"
             handle=".canvas-step__handle"
             @end="handleDragEnd"
+            :fallback-tolerance="3"
           >
             <template #item="{ element: step }">
               <CanvasStep
@@ -281,8 +282,30 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<Emits>()
 
+// Ensure all steps have unique IDs (fix for steps with missing/duplicate IDs)
+function ensureUniqueIds(steps: TestStep[]): TestStep[] {
+  const idMap = new Map<string, number>()
+  return steps.map((step, index) => {
+    if (!step.id) {
+      return { ...step, id: `step_${Date.now()}_${index}` }
+    }
+    const count = idMap.get(step.id) || 0
+    idMap.set(step.id, count + 1)
+    if (count > 0) {
+      // Duplicate ID found, generate new unique ID
+      return { ...step, id: `step_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}` }
+    }
+    return step
+  })
+}
+
+// Generate safe key for draggable (handles missing/duplicate IDs)
+function getStepKey(step: TestStep, index: number): string {
+  return step.id || `step_${index}`
+}
+
 // Local state
-const localSteps = ref<TestStep[]>([...props.modelValue])
+const localSteps = ref<TestStep[]>(ensureUniqueIds([...props.modelValue]))
 const selectedStepId = ref<string | null>(null)
 const selectedStep = ref<TestStep | null>(null)
 const editorMode = ref<'visual' | 'json'>('visual')
@@ -369,12 +392,12 @@ watch(() => props.modelValue, (newValue) => {
 
   if (newValueStr !== lastKnownValue) {
     if (isInitializing) {
-      localSteps.value = [...newValue]
+      localSteps.value = ensureUniqueIds([...newValue])
       lastKnownValue = newValueStr
       isInitializing = false
     } else {
       if (JSON.stringify(localSteps.value) !== newValueStr) {
-        localSteps.value = [...newValue]
+        localSteps.value = ensureUniqueIds([...newValue])
         lastKnownValue = newValueStr
       }
     }
@@ -430,8 +453,9 @@ function handleDrop(event: DragEvent) {
   if (!data) return
 
   const stepData = JSON.parse(data)
+  // Use more unique ID generation to avoid duplicates
   const newStep: TestStep = {
-    id: `step_${Date.now()}`,
+    id: `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     type: stepData.type,
     name: stepData.label,
     params: getDefaultParams(stepData.type, props.scriptType)
@@ -457,9 +481,10 @@ function removeStep(step: TestStep) {
 
 function copyStep(step: TestStep) {
   clipboard.value = JSON.parse(JSON.stringify(step))
+  // Use more unique ID generation to avoid duplicates
   const newStep: TestStep = {
     ...clipboard.value,
-    id: `step_${Date.now()}`,
+    id: `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     name: `${clipboard.value.name} (副本)`
   }
   const index = steps.value.findIndex(s => s.id === step.id)

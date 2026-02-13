@@ -47,13 +47,13 @@ class TestExecutor:
 
             # 初始化测试引擎
             if not self._setup_engine():
-                self._mark_failed('引擎初始化失败')
+                self._mark_failed('引擎初始化失败', result=None)
                 return
 
             # 获取测试步骤
             steps = self._get_steps()
             if not steps:
-                self._mark_failed('没有可执行的步骤')
+                self._mark_failed('没有可执行的步骤', result=None)
                 return
 
             # 执行测试
@@ -329,15 +329,17 @@ class TestExecutor:
 
         return new_steps
 
-    def _mark_failed(self, error_msg: str):
+    def _mark_failed(self, error_msg: str, result: dict | None = None):
         """标记执行失败"""
         self.execution.status = 'failed'
         self.execution.completed_at = timezone.now()
+        # Preserve the total count from the actual execution result if available
+        total = result.get('total', 0) if result else 0
         self.execution.result = {
-            'total': 0,
+            'total': total,
             'passed': 0,
             'failed': 1,
-            'steps': [],
+            'steps': result.get('steps', []) if result else [],
             'error': error_msg
         }
         self.execution.save()

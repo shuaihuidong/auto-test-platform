@@ -161,7 +161,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<Emits>()
 
-const localStep = ref<TestStep>({ ...props.step })
+const localStep = ref<TestStep>(JSON.parse(JSON.stringify(props.step)))
 const jsonValues = ref<Record<string, string>>({})
 const advancedJson = ref('')
 const fieldErrors = ref<Record<string, string>>({})
@@ -182,7 +182,7 @@ const locatorTypeOptions = [
 // Watch for step changes
 watch(() => props.step, (newStep) => {
   isUpdatingFromProps.value = true
-  localStep.value = { ...newStep }
+  localStep.value = JSON.parse(JSON.stringify(newStep))
   updateJsonValues()
   updateAdvancedJson()
   setTimeout(() => {

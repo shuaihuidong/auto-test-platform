@@ -236,7 +236,7 @@ const webStepCategories: StepCategory[] = [
         label: '文本校验',
         icon: SearchOutlined,
         defaultParams: {
-          locator: { type: '', value: '' },
+          locator: { type: 'xpath', value: '' },
           text: ''
         },
         description: '验证页面或元素中是否包含指定文本',
@@ -335,7 +335,7 @@ const webStepCategories: StepCategory[] = [
         label: '等待文本',
         icon: SearchOutlined,
         defaultParams: {
-          locator: { type: '', value: '' },
+          locator: { type: 'xpath', value: '' },
           text: '',
           timeout: 10
         },
@@ -808,7 +808,7 @@ const mobileStepCategories: StepCategory[] = [
         label: '文本校验',
         icon: SearchOutlined,
         defaultParams: {
-          locator: { type: '', value: '' },
+          locator: { type: 'xpath', value: '' },
           text: ''
         },
         description: '验证文本内容',
@@ -1139,10 +1139,11 @@ export function getStepByType(stepType: string, scriptType: ScriptType): StepDef
 
 /**
  * Get default parameters for a step type
+ * Returns a deep copy to prevent shared references between step instances
  */
 export function getDefaultParams(stepType: string, scriptType: ScriptType) {
   const step = getStepByType(stepType, scriptType)
-  return step?.defaultParams || {}
+  return step?.defaultParams ? JSON.parse(JSON.stringify(step.defaultParams)) : {}
 }
 
 /**
