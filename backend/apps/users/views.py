@@ -240,18 +240,22 @@ class UserViewSet(viewsets.ModelViewSet):
                 timeout=5
             )
 
-            if response.status_code in [200, 201]:
+            if response.status_code in [200, 201, 204]:  # 204: 用户已存在但更新成功
                 permissions_url = f"http://{settings.RABBITMQ_HOST}:15672/api/permissions/%2F/{username}"
-                requests.put(
+                perm_response = requests.put(
                     permissions_url,
                     json={"configure": ".*", "write": ".*", "read": ".*"},
                     auth=auth,
                     timeout=5
                 )
-                return True
+                # 检查权限设置是否成功
+                if perm_response.status_code in [200, 201, 204]:
+                    return True
             return False
 
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.error(f'创建RabbitMQ用户失败: {username}, 错误: {str(e)}')
             return False
 
     def delete_rabbitmq_user_for_platform_user(self, username):
