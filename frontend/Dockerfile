@@ -1,4 +1,4 @@
-# 多阶段构建 - 前端 Dockerfile for Zeabur
+# 多阶段构建 - 前端 Dockerfile
 
 # Stage 1: 构建阶段
 FROM node:18-alpine AS builder
@@ -23,10 +23,11 @@ FROM nginx:alpine
 # 复制构建产物到 nginx
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# 复制 nginx 配置
-COPY nginx.conf.template /etc/nginx/conf.d/default.conf
+# 复制 nginx 配置文件（支持通过ARG指定）
+ARG NGINX_CONFIG=nginx.conf.template
+COPY ${NGINX_CONFIG} /etc/nginx/conf.d/default.conf
 
 # 暴露端口
-EXPOSE 80
+EXPOSE 80 443
 
 CMD ["nginx", "-g", "daemon off;"]

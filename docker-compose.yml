@@ -43,6 +43,7 @@ services:
       RABBITMQ_PUBLIC_HOST: ${RABBITMQ_PUBLIC_HOST:-43.136.56.242}
       RABBITMQ_VHOST: /
       PORT: 8000
+      SECURE_SSL_REDIRECT: "False"
     volumes:
       - backend_static:/app/staticfiles
       - backend_media:/app/media
@@ -67,6 +68,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NGINX_CONFIG: nginx-https.conf.template
     container_name: auto-test-frontend
     ports:
       - "80:80"
