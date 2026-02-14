@@ -84,6 +84,10 @@ class SeleniumEngine(TestEngine):
                 result = self._assert(params)
             elif step_type == 'wait':
                 result = self._wait(params)
+            elif step_type == 'wait_element':
+                result = self._wait_element(params)
+            elif step_type == 'wait_text':
+                result = self._wait_text(params)
             elif step_type == 'scroll':
                 result = self._scroll(params)
             elif step_type == 'switch':
@@ -139,19 +143,19 @@ class SeleniumEngine(TestEngine):
         """获取测试结果"""
         return self.results
 
-    def _find_element(self, locator: Dict[str, str]):
+    def _find_element(self, locatoror: Dict[str, str]):
         """查找页面元素"""
-        by_type = self._get_by_type(locator.get('type', 'xpath'))
-        value = locator.get('value', '')
+        by_type = self._get_by_type(locatoror.get('type', 'xpath'))
+        value = locatoror.get('value', '')
 
         # 验证 value 不为空
         if not value or not value.strip():
-            raise ValueError(f"定位器值不能为空 (type: {locator.get('type', 'xpath')})")
+            raise ValueError(f"定位器值不能为空 (type: {locatoror.get('type', 'xpath')})")
 
         wait = WebDriverWait(self.driver, self.timeout)
         return wait.until(EC.presence_of_element_located((by_type, value)))
 
-    def _get_by_type(self, locator_type: str):
+    def _get_by_type(self, locatoror_type: str):
         """获取By定位类型"""
         mapping = {
             'id': By.ID,
@@ -163,7 +167,7 @@ class SeleniumEngine(TestEngine):
             'link_text': By.LINK_TEXT,
             'partial_link_text': By.PARTIAL_LINK_TEXT
         }
-        return mapping.get(locator_type, By.XPATH)
+        return mapping.get(locatoror_type, By.XPATH)
 
     def _goto(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """导航到指定URL"""
@@ -176,24 +180,24 @@ class SeleniumEngine(TestEngine):
 
     def _click(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """点击元素"""
-        locator = params.get('locator')
-        if not locator:
-            return {'success': False, 'error': '缺少locator参数'}
+        locatoror = params.get('locatoror')
+        if not locatoror:
+            return {'success': False, 'error': '缺少locatoror参数'}
 
-        element = self._find_element(locator)
+        element = self._find_element(locatoror)
         element.click()
         return {'success': True, 'message': f'已点击元素'}
 
     def _input(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """输入文本"""
-        locator = params.get('locator')
+        locatoror = params.get('locatoror')
         value = params.get('value')
         clear_first = params.get('clear_first', True)
 
-        if not locator or value is None:
-            return {'success': False, 'error': '缺少locator或value参数'}
+        if not locatoror or value is None:
+            return {'success': False, 'error': '缺少locatoror或value参数'}
 
-        element = self._find_element(locator)
+        element = self._find_element(locatoror)
         if clear_first:
             element.clear()
         element.send_keys(value)
@@ -202,12 +206,12 @@ class SeleniumEngine(TestEngine):
     def _assert(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """断言"""
         assert_type = params.get('assert_type', 'text')
-        locator = params.get('locator')
+        locatoror = params.get('locatoror')
         expected = params.get('expected')
 
         try:
             if assert_type == 'text':
-                element = self._find_element(locator)
+                element = self._find_element(locatoror)
                 actual = element.text
                 success = str(actual) == str(expected)
                 return {
@@ -218,7 +222,7 @@ class SeleniumEngine(TestEngine):
                 }
 
             elif assert_type == 'exists':
-                element = self._find_element(locator)
+                element = self._find_element(locatoror)
                 return {
                     'success': True,
                     'message': '元素存在'
@@ -226,7 +230,7 @@ class SeleniumEngine(TestEngine):
 
             elif assert_type == 'attribute':
                 attr_name = params.get('attribute', 'value')
-                element = self._find_element(locator)
+                element = self._find_element(locatoror)
                 actual = element.get_attribute(attr_name)
                 success = str(actual) == str(expected)
                 return {
@@ -257,7 +261,7 @@ class SeleniumEngine(TestEngine):
                 }
 
             elif assert_type == 'contains':
-                element = self._find_element(locator)
+                element = self._find_element(locatoror)
                 actual = element.text
                 success = str(expected) in str(actual)
                 return {
@@ -268,7 +272,7 @@ class SeleniumEngine(TestEngine):
                 }
 
             elif assert_type == 'not_contains':
-                element = self._find_element(locator)
+                element = self._find_element(locatoror)
                 actual = element.text
                 success = str(expected) not in str(actual)
                 return {
@@ -280,7 +284,7 @@ class SeleniumEngine(TestEngine):
 
             elif assert_type == 'regex':
                 import re
-                element = self._find_element(locator)
+                element = self._find_element(locatoror)
                 actual = element.text
                 try:
                     pattern = re.compile(str(expected))
@@ -295,7 +299,7 @@ class SeleniumEngine(TestEngine):
                     return {'success': False, 'error': f'正则表达式错误: {str(e)}'}
 
             elif assert_type == 'numeric_compare':
-                element = self._find_element(locator)
+                element = self._find_element(locatoror)
                 actual = element.text
                 operator = params.get('operator', '==')
 
@@ -354,12 +358,12 @@ class SeleniumEngine(TestEngine):
             return {'success': True, 'message': f'已等待 {duration} 秒'}
 
         elif wait_type == 'element':
-            locator = params.get('locator')
-            if not locator:
-                return {'success': False, 'error': '缺少locator参数'}
+            locatoror = params.get('locatoror')
+            if not locatoror:
+                return {'success': False, 'error': '缺少locatoror参数'}
 
-            by_type = self._get_by_type(locator.get('type', 'xpath'))
-            value = locator.get('value', '')
+            by_type = self._get_by_type(locatoror.get('type', 'xpath'))
+            value = locatoror.get('value', '')
             # 验证 value 不为空
             if not value or not value.strip():
                 return {'success': False, 'error': '等待元素的定位器值不能为空'}
@@ -370,6 +374,68 @@ class SeleniumEngine(TestEngine):
             return {'success': True, 'message': f'元素已出现'}
 
         return {'success': False, 'error': f'未知的等待类型: {wait_type}'}
+
+    def _wait_element(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """等待元素出现"""
+        timeout = params.get('timeout', 10)
+        locatoror = params.get('locatoror')
+
+        if not locatoror:
+            return {'success': False, 'error': '缺少locatoror参数'}
+
+        by_type = self._get_by_type(locatoror.get('type', 'xpath'))
+        value = locatoror.get('value', '')
+
+        # 验证 value 不为空
+        if not value or not value.strip():
+            return {'success': False, 'error': '等待元素的定位器值不能为空'}
+
+        try:
+            WebDriverWait(self.driver, timeout).until(
+                EC.presence_of_element_located((by_type, value))
+            )
+            return {'success': True, 'message': f'元素已出现'}
+        except TimeoutException:
+            return {'success': False, 'error': f'等待元素超时（{timeout}秒）', 'screenshot': self._capture_screenshot()}
+
+    def _wait_text(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """等待文本出现"""
+        timeout = params.get('timeout', 10)
+        text = params.get('text', '')
+        locatoror = params.get('locatoror')
+
+        if not text or not text.strip():
+            return {'success': False, 'error': '等待的文本不能为空'}
+
+        try:
+            if locatoror:
+                # 在指定元素中查找文本
+                by_type = self._get_by_type(locatoror.get('type', 'xpath'))
+                value = locatoror.get('value', '')
+
+                if not value or not value.strip():
+                    return {'success': False, 'error': '定位器值不能为空'}
+
+                element = WebDriverWait(self.driver, timeout).until(
+                    EC.presence_of_element_located((by_type, value))
+                )
+
+                if text in element.text:
+                    return {'success': True, 'message': f'文本"{text}"已出现'}
+                else:
+                    return {'success': False, 'error': f'元素中未找到文本"{text}"', 'screenshot': self._capture_screenshot()}
+            else:
+                # 在整个页面中查找文本
+                from selenium.webdriver.common.by import By
+                elements = WebDriverWait(self.driver, timeout).until(
+                    lambda driver: driver.find_elements(By.XPATH, f'//*[contains(text(), "{text}")]')
+                )
+                if elements:
+                    return {'success': True, 'message': f'文本"{text}"已出现'}
+                else:
+                    return {'success': False, 'error': f'页面中未找到文本"{text}"', 'screenshot': self._capture_screenshot()}
+        except TimeoutException:
+            return {'success': False, 'error': f'等待文本超时（{timeout}秒）', 'screenshot': self._capture_screenshot()}
 
     def _scroll(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """滚动页面"""
@@ -382,11 +448,11 @@ class SeleniumEngine(TestEngine):
             return {'success': True, 'message': f'已滚动到 ({x}, {y})'}
 
         elif scroll_type == 'element':
-            locator = params.get('locator')
-            if not locator:
-                return {'success': False, 'error': '缺少locator参数'}
+            locatoror = params.get('locatoror')
+            if not locatoror:
+                return {'success': False, 'error': '缺少locatoror参数'}
 
-            element = self._find_element(locator)
+            element = self._find_element(locatoror)
             self.driver.execute_script('arguments[0].scrollIntoView(true);', element)
             return {'success': True, 'message': '已滚动到元素'}
 
@@ -410,9 +476,9 @@ class SeleniumEngine(TestEngine):
             return {'success': True, 'message': '已切换窗口'}
 
         elif switch_type == 'frame':
-            locator = params.get('locator')
-            if locator:
-                element = self._find_element(locator)
+            locatoror = params.get('locatoror')
+            if locatoror:
+                element = self._find_element(locatoror)
                 self.driver.switch_to.frame(element)
             else:
                 self.driver.switch_to.default_content()
@@ -498,13 +564,13 @@ class SeleniumEngine(TestEngine):
         参数:
             params: 包含:
                 - name: 变量名
-                - locator: 元素定位器
+                - locatoror: 元素定位器
                 - extract_type: 提取类型 (text, attribute, value)
                 - attribute: 属性名（当extract_type为attribute时使用）
                 - pattern: 提取模式（正则表达式，可选）
         """
         name = params.get('name')
-        locator = params.get('locator')
+        locatoror = params.get('locatoror')
         extract_type = params.get('extract_type', 'text')
 
         if not name:
@@ -512,10 +578,10 @@ class SeleniumEngine(TestEngine):
 
         try:
             if extract_type in ['text', 'attribute', 'value']:
-                if not locator:
-                    return {'success': False, 'error': f'{extract_type}类型需要locator参数'}
+                if not locatoror:
+                    return {'success': False, 'error': f'{extract_type}类型需要locatoror参数'}
 
-                element = self._find_element(locator)
+                element = self._find_element(locatoror)
 
                 if extract_type == 'text':
                     extracted_value = element.text
@@ -571,20 +637,20 @@ class SeleniumEngine(TestEngine):
 
         参数:
             params: 包含:
-                - locator: 文件输入元素定位器
+                - locatoror: 文件输入元素定位器
                 - file_path: 要上传的文件路径（支持变量替换）
         """
-        locator = params.get('locator')
+        locatoror = params.get('locatoror')
         file_path = params.get('file_path')
 
-        if not locator:
-            return {'success': False, 'error': '缺少locator参数'}
+        if not locatoror:
+            return {'success': False, 'error': '缺少locatoror参数'}
         if not file_path:
             return {'success': False, 'error': '缺少file_path参数'}
 
         try:
             # 查找文件输入元素
-            element = self._find_element(locator)
+            element = self._find_element(locatoror)
 
             # 解析文件路径中的变量
             resolved_path = self.resolve_variables(file_path)
