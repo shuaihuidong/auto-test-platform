@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.4.0-blue)
+![Version](https://img.shields.io/badge/version-1.4.1-blue)
 ![Django](https://img.shields.io/badge/Django-4.2.7-green)
 ![Vue](https://img.shields.io/badge/Vue-3.3.8-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -14,6 +14,18 @@
 [功能特性](#功能特性) • [快速开始](#快速开始) • [使用说明](#使用说明) • [部署文档](#生产环境部署)
 
 </div>
+
+> **🎉 v1.4.1 已发布** - 重要安全性修复和代码质量提升
+>
+> **主要更新**:
+> - ✅ Redis Channel层（支持多进程部署）
+> - ✅ CSRF保护优化
+> - ✅ 密钥安全检查
+> - ✅ RabbitMQ密码加密
+> - ✅ 代码规范工具配置
+> - ✅ 基础单元测试
+>
+> 详细信息请查看 [CHANGELOG.md](./CHANGELOG.md) 和 [SECURITY.md](./SECURITY.md)
 
 ## 功能特性
 
@@ -945,6 +957,29 @@ curl -X POST http://localhost:8000/api/executor/heartbeat/ \
 | Safari | 14+ |
 
 ## 更新日志
+
+### v1.4.1 (2026-03-06) - 安全性修复与代码质量提升
+
+**安全性修复**:
+- 🔐 **Redis Channel层** - 使用Redis替代内存Channel层，支持多进程部署
+- 🔒 **CSRF保护优化** - 精确豁免特定API端点，其他端点恢复CSRF保护
+- 🔑 **密钥安全检查** - 生产环境启动时强制检查密钥安全性
+- 🛡️ **RabbitMQ密码加密** - 使用Fernet加密存储密码
+- 📦 **密码迁移工具** - 提供数据迁移命令处理现有密码
+
+**代码质量提升**:
+- 🎨 **代码规范工具** - 添加Black、isort、ESLint、Prettier配置
+- 🧪 **单元测试** - 添加核心功能的单元测试
+- 📝 **开发工具** - 添加VSCode配置、EditorConfig、Makefile
+- 📚 **文档完善** - 新增SECURITY.md、QUICK_START_SECURITY.md、CHANGELOG.md
+
+**依赖更新**:
+- 新增 `cryptography==41.0.7` 用于密码加密
+
+**破坏性变更**:
+- ⚠️ 生产环境必须设置 `RABBITMQ_ENCRYPTION_KEY` 环境变量
+- ⚠️ 需要安装Redis服务
+- ⚠️ 现有数据库需要运行密码迁移命令
 
 ### v1.4.0 (2026-02-12) - 权限优化与配置简化
 

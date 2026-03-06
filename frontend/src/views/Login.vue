@@ -92,9 +92,54 @@
             </a-form-item>
           </a-form>
 
+          <!-- 使用声明 -->
+          <div class="terms-footer">
+            <p>登录即表示您同意</p>
+            <a @click="showTerms = true">《使用条款与免责声明》</a>
+          </div>
         </div>
       </div>
     </div>
+
+    <!-- 使用条款弹窗 -->
+    <a-modal
+      v-model:open="showTerms"
+      title="使用条款与免责声明"
+      :footer="null"
+      width="680px"
+      class="terms-modal"
+    >
+      <div class="terms-content">
+        <h3>一、服务说明</h3>
+        <p>本自动化测试管理平台（以下简称"本平台"）仅供用户对<strong>自己拥有合法权限的系统</strong>进行自动化测试使用。</p>
+
+        <h3>二、使用限制</h3>
+        <p>用户承诺不会利用本平台从事以下行为：</p>
+        <ul>
+          <li>对未获得书面授权的第三方系统进行测试、扫描或攻击</li>
+          <li>侵入、破坏或干扰任何计算机信息系统</li>
+          <li>窃取、泄露或滥用他人数据和个人信息</li>
+          <li>其他违反《中华人民共和国网络安全法》等法律法规的行为</li>
+        </ul>
+
+        <h3>三、用户责任</h3>
+        <p>1. 用户应确保仅对本平台用于合法、授权的测试目的。</p>
+        <p>2. 用户应对其账户的使用行为承担全部法律责任。</p>
+        <p>3. 用户应遵守所在国家/地区的相关法律法规。</p>
+
+        <h3>四、免责声明</h3>
+        <p>1. 本平台仅提供测试工具，不对用户的使用行为承担任何法律责任。</p>
+        <p>2. 因用户违法使用本平台而产生的一切后果，由用户自行承担。</p>
+        <p>3. 本平台保留随时中止或终止服务的权利。</p>
+
+        <h3>五、法律适用</h3>
+        <p>本条款受中华人民共和国法律管辖。如发生争议，双方应友好协商解决。</p>
+
+        <div class="terms-footer-info">
+          <p>更新日期：2026年2月23日</p>
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -117,6 +162,7 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const loading = ref(false)
+const showTerms = ref(false)
 const formState = ref({
   username: '',
   password: ''
@@ -230,6 +276,29 @@ async function handleLogin() {
 
 .login-page .submit-btn:hover .btn-icon {
   transform: translateX(4px);
+}
+
+.login-page .terms-footer {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.login-page .terms-footer p {
+  margin: 0;
+  display: inline;
+}
+
+.login-page .terms-footer a {
+  color: #6366f1;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.login-page .terms-footer a:hover {
+  color: #4f46e5;
+  text-decoration: underline;
 }
 </style>
 
@@ -523,5 +592,60 @@ async function handleLogin() {
   .form-title {
     font-size: 24px;
   }
+}
+
+/* 使用条款样式 */
+.terms-content {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+.terms-content h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 20px 0 10px 0;
+  padding-left: 12px;
+  border-left: 3px solid #6366f1;
+}
+
+.terms-content h3:first-child {
+  margin-top: 0;
+}
+
+.terms-content p {
+  font-size: 14px;
+  color: #4b5563;
+  line-height: 1.8;
+  margin: 8px 0;
+}
+
+.terms-content ul {
+  margin: 10px 0;
+  padding-left: 20px;
+}
+
+.terms-content li {
+  font-size: 14px;
+  color: #4b5563;
+  line-height: 2;
+}
+
+.terms-content strong {
+  color: #1f2937;
+}
+
+.terms-footer-info {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  text-align: right;
+}
+
+.terms-footer-info p {
+  font-size: 12px;
+  color: #9ca3af;
+  margin: 0;
 }
 </style>

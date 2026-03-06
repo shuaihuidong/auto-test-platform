@@ -14,6 +14,21 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY') or os.getenv('SECRET_KEY', 'django-i
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
+# 生产环境密钥安全检查
+if not DEBUG:
+    if not os.getenv('DJANGO_SECRET_KEY') and not os.getenv('SECRET_KEY'):
+        raise ValueError(
+            "生产环境必须设置 DJANGO_SECRET_KEY 或 SECRET_KEY 环境变量！"
+        )
+    if SECRET_KEY.startswith('django-insecure-'):
+        raise ValueError(
+            "生产环境不能使用默认的insecure密钥！请设置安全的SECRET_KEY。"
+        )
+    if len(SECRET_KEY) < 32:
+        raise ValueError(
+            "SECRET_KEY 长度必须至少32个字符！"
+        )
+
 # Allowed hosts - 支持从环境变量读取，用逗号分隔
 ALLOWED_HOSTS_ENV = os.getenv('DJANGO_ALLOWED_HOSTS', '*')
 if ALLOWED_HOSTS_ENV == '*':
@@ -146,9 +161,14 @@ os.makedirs(SCREENSHOTS_ROOT, exist_ok=True)
 
 # Channels settings
 ASGI_APPLICATION = 'core.asgi.application'
+
+# Channel层配置 - 使用Redis支持多进程部署
 CHANNEL_LAYERS = {
     'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [(os.getenv('REDIS_HOST', '127.0.0.1'), int(os.getenv('REDIS_PORT', 6379)))],
+        },
     },
 }
 
@@ -158,6 +178,19 @@ RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
 RABBITMQ_USER = os.getenv('RABBITMQ_USER', 'guest')
 RABBITMQ_PASSWORD = os.getenv('RABBITMQ_PASSWORD', 'guest')
 RABBITMQ_VHOST = os.getenv('RABBITMQ_VHOST', '/')
+
+# RabbitMQ密码加密密钥（生产环境必须设置）
+RABBITMQ_ENCRYPTION_KEY = os.getenv('RABBITMQ_ENCRYPTION_KEY')
+if not RABBITMQ_ENCRYPTION_KEY:
+    # 开发环境使用默认密钥（生产环境必须设置）
+    if DEBUG:
+        # 生成一个新的Fernet密钥作为开发环境默认值
+        RABBITMQ_ENCRYPTION_KEY = 'KI0HBM0qO18jJvi06PWPxS7rqYCbu17BOisPeKWPEOo='
+    else:
+        raise ValueError(
+            "生产环境必须设置 RABBITMQ_ENCRYPTION_KEY 环境变量！\n"
+            "生成密钥命令: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+        )
 
 # Session settings - 使用文件存储以避免容器重启导致session丢失
 SESSION_ENGINE = 'django.contrib.sessions.backends.file'

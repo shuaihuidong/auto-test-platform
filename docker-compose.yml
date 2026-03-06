@@ -1,13 +1,31 @@
 version: '3.8'
 
 services:
+  # Redis 缓存和Channel层
+  redis:
+    image: redis:7-alpine
+    container_name: auto-test-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - auto-test-network
+
   # RabbitMQ 消息队列
   rabbitmq:
     image: rabbitmq:3.12-management
     container_name: auto-test-rabbitmq
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -30,7 +48,7 @@ services:
       dockerfile: Dockerfile
     container_name: auto-test-backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-django-insecure-production-key-change-this}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
@@ -74,6 +92,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    volumes:
+      - ./ssl/cert.crt:/etc/nginx/ssl/cert.crt:ro
+      - ./ssl/cert.key:/etc/nginx/ssl/cert.key:ro
     depends_on:
       - backend
     restart: unless-stopped
@@ -81,6 +102,8 @@ services:
       - auto-test-network
 
 volumes:
+  redis_data:
+    driver: local
   rabbitmq_data:
     driver: local
   backend_static:

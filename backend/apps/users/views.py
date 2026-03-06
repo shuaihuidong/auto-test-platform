@@ -6,9 +6,12 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth import get_user_model
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.conf import settings
 import secrets
 import socket
 import os
+import base64
+from cryptography.fernet import Fernet
 from .serializers import (
     UserSerializer,
     UserCreateSerializer,
@@ -19,6 +22,45 @@ from .serializers import (
 from .permissions import IsSuperAdmin, IsAdmin, IsTester, IsGuestOrAbove
 
 User = get_user_model()
+
+
+# RabbitMQ密码加密/解密函数
+def encrypt_rabbitmq_password(password: str) -> str:
+    """
+    加密RabbitMQ密码
+
+    Args:
+        password: 明文密码
+
+    Returns:
+        加密后的密码字符串
+    """
+    try:
+        # 直接使用Fernet密钥
+        f = Fernet(settings.RABBITMQ_ENCRYPTION_KEY.encode() if isinstance(settings.RABBITMQ_ENCRYPTION_KEY, str) else settings.RABBITMQ_ENCRYPTION_KEY)
+        encrypted = f.encrypt(password.encode())
+        return encrypted.decode()
+    except Exception as e:
+        raise ValueError(f"密码加密失败: {str(e)}")
+
+
+def decrypt_rabbitmq_password(encrypted_password: str) -> str:
+    """
+    解密RabbitMQ密码
+
+    Args:
+        encrypted_password: 加密的密码
+
+    Returns:
+        明文密码
+    """
+    try:
+        # 直接使用Fernet密钥
+        f = Fernet(settings.RABBITMQ_ENCRYPTION_KEY.encode() if isinstance(settings.RABBITMQ_ENCRYPTION_KEY, str) else settings.RABBITMQ_ENCRYPTION_KEY)
+        decrypted = f.decrypt(encrypted_password.encode())
+        return decrypted.decode()
+    except Exception as e:
+        raise ValueError(f"密码解密失败: {str(e)}")
 
 
 @csrf_exempt
@@ -90,9 +132,13 @@ class UserViewSet(viewsets.ModelViewSet):
         """创建用户时，如果启用了 RabbitMQ，同步创建 RabbitMQ 用户"""
         user = serializer.save()
         if user.rabbitmq_enabled:
+            # 生成随机密码
             rabbitmq_password = secrets.token_urlsafe(16)
-            user.rabbitmq_password = rabbitmq_password
+            # 加密存储密码
+            encrypted_password = encrypt_rabbitmq_password(rabbitmq_password)
+            user.rabbitmq_password = encrypted_password
             user.save()
+            # 创建RabbitMQ用户时使用明文密码
             self.create_rabbitmq_user_for_platform_user(user.username, rabbitmq_password)
 
     def update(self, request, *args, **kwargs):
@@ -302,7 +348,8 @@ class UserViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            from django.conf import settings
+            # 解密密码以返回给客户端
+            decrypted_password = decrypt_rabbitmq_password(user.rabbitmq_password)
 
             # 获取 RabbitMQ 服务器地址
             # RABBITMQ_HOST 是Docker内部通信地址（如'rabbitmq'服务名）
@@ -333,7 +380,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
             return Response({
                 'username': user.username,
-                'password': user.rabbitmq_password,
+                'password': decrypted_password,  # 返回解密后的密码
                 'host': rabbitmq_host,
                 'port': settings.RABBITMQ_PORT,
                 'vhost': settings.RABBITMQ_VHOST
@@ -362,14 +409,16 @@ class UserViewSet(viewsets.ModelViewSet):
         if enable and not user.rabbitmq_enabled:
             # 启用 RabbitMQ：生成随机密码并创建用户
             rabbitmq_password = secrets.token_urlsafe(16)
-            user.rabbitmq_password = rabbitmq_password
+            # 加密存储密码
+            encrypted_password = encrypt_rabbitmq_password(rabbitmq_password)
+            user.rabbitmq_password = encrypted_password
             user.rabbitmq_enabled = True
 
             if self.create_rabbitmq_user_for_platform_user(user.username, rabbitmq_password):
                 user.save()
                 return Response({
                     'message': f'用户 {user.username} 的 RabbitMQ 功能已启用',
-                    'rabbitmq_password': rabbitmq_password
+                    'rabbitmq_password': rabbitmq_password  # 返回明文密码供用户配置
                 })
             else:
                 return Response(

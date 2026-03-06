@@ -1,0 +1,22 @@
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+x509_extensions = v3_req
+
+[dn]
+C = CN
+ST = Beijing
+L = Beijing
+O = AutoTest
+OU = IT
+CN = 43.136.56.242
+
+[v3_req]
+subjectAltName = @alt_names
+basicConstraints = CA:FALSE
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+
+[alt_names]
+IP.1 = 43.136.56.242

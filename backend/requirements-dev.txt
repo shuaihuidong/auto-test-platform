@@ -1,0 +1,18 @@
+# 开发依赖
+# 代码格式化和检查工具
+black==23.12.1
+isort==5.13.2
+flake8==6.1.0
+
+# 类型检查
+mypy==1.7.1
+
+# 测试工具
+pytest==7.4.3
+pytest-django==4.7.0
+pytest-cov==4.1.0
+pytest-asyncio==0.21.1
+
+# 调试工具
+django-debug-toolbar==4.2.0
+ipdb==0.13.13
