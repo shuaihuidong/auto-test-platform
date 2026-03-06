@@ -153,6 +153,19 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    def create(self, request, *args, **kwargs):
+        """创建项目 - 权限检查"""
+        user = request.user
+
+        # 访客不能创建项目
+        if user.role == 'guest':
+            return Response(
+                {'error': '访客无权创建项目，请联系管理员升级权限'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        return super().create(request, *args, **kwargs)
+
     def destroy(self, request, *args, **kwargs):
         """删除项目 - 只有项目创建者可以删除"""
         project = self.get_object()
