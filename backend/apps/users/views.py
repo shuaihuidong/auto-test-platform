@@ -46,21 +46,34 @@ def encrypt_rabbitmq_password(password: str) -> str:
 
 def decrypt_rabbitmq_password(encrypted_password: str) -> str:
     """
-    解密RabbitMQ密码
+    解密RabbitMQ密码（支持向后兼容）
 
     Args:
-        encrypted_password: 加密的密码
+        encrypted_password: 加密的密码或明文密码
 
     Returns:
         明文密码
     """
+    if not encrypted_password:
+        return encrypted_password
+
+    # 如果密码长度较短（<100），可能是明文或旧格式，直接返回
+    # Fernet加密后的密码通常长度>100
+    if len(encrypted_password) < 100:
+        return encrypted_password
+
     try:
-        # 直接使用Fernet密钥
+        # 使用Fernet密钥解密
         f = Fernet(settings.RABBITMQ_ENCRYPTION_KEY.encode() if isinstance(settings.RABBITMQ_ENCRYPTION_KEY, str) else settings.RABBITMQ_ENCRYPTION_KEY)
         decrypted = f.decrypt(encrypted_password.encode())
         return decrypted.decode()
     except Exception as e:
-        raise ValueError(f"密码解密失败: {str(e)}")
+        # 如果解密失败，可能是明文密码，直接返回
+        # 这样可以向后兼容旧数据
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"密码解密失败，可能是明文密码: {str(e)}")
+        return encrypted_password
 
 
 @csrf_exempt
