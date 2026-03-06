@@ -152,3 +152,18 @@ class ProjectViewSet(viewsets.ModelViewSet):
         ).distinct()
 
         return queryset
+
+    def destroy(self, request, *args, **kwargs):
+        """删除项目 - 只有项目创建者可以删除"""
+        project = self.get_object()
+
+        # 检查权限：只有项目创建者可以删除项目
+        if project.creator != request.user:
+            return Response(
+                {'error': '只有项目创建者可以删除项目'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # 删除项目（会级联删除相关数据）
+        project.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
