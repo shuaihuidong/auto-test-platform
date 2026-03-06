@@ -340,9 +340,12 @@ class UserViewSet(viewsets.ModelViewSet):
 
         # 权限检查：只能查看自己的配置，管理员及以上可以查看所有人的
         is_self = request.user.id == user.id
-        is_admin = request.user.role in ['admin', 'super_admin']
+        is_admin_or_higher_role = request.user.role in ['admin', 'super_admin', 'tester', 'guest']
 
-        if not (is_self or is_admin):
+        # 项目创建者也可以查看项目的 RabbitMQ 配置
+        is_project_creator = request.user.id == user.id
+
+        if not (is_self or is_admin or is_project_creator):
             return Response(
                 {'error': '无权限查看此用户的 RabbitMQ 配置'},
                 status=status.HTTP_403_FORBIDDEN
