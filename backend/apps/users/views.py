@@ -340,7 +340,7 @@ class UserViewSet(viewsets.ModelViewSet):
         # 项目创建者也可以查看项目的 RabbitMQ 配置
         is_project_creator = request.user.id == user.id
 
-        if not (is_self or is_admin or is_project_creator):
+        if not (is_self or is_admin_or_higher_role or is_project_creator):
             return Response(
                 {'error': '无权限查看此用户的 RabbitMQ 配置'},
                 status=status.HTTP_403_FORBIDDEN
@@ -407,10 +407,10 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def toggle_rabbitmq(self, request, pk=None):
-        """开关用户的 RabbitMQ 功能 - 仅超级管理员"""
-        if request.user.role != 'super_admin':
+        """开关用户的 RabbitMQ 功能 - 管理员及以上"""
+        if request.user.role not in ['admin', 'super_admin']:
             return Response(
-                {'error': '只有超级管理员可以修改 RabbitMQ 设置'},
+                {'error': '只有管理员可以修改 RabbitMQ 设置'},
                 status=status.HTTP_403_FORBIDDEN
             )
 
