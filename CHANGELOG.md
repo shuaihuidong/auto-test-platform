@@ -5,6 +5,26 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.4.2] - 2026-03-07
+
+### 🐛 Bug修复
+
+#### 前端修复
+- 🐛 修复 `AccountRoleManage.vue` 中 RabbitMQ 相关 API 调用未携带 Token 的问题
+  - 将原生 `axios` 替换为配置好的 `request` 实例
+  - 修复 API 路径重复问题（`/api/api/...` -> `/api/...`）
+  - 修复响应数据访问问题（`response.data.users` -> `response.users`）
+
+#### 后端修复
+- 🐛 优化 CSRF 中间件，对携带 Token 认证的 API 请求豁免 CSRF 检查
+  - 新增 `_has_valid_token_auth()` 方法检测 Token 认证
+  - Token 认证请求自动豁免 CSRF 保护
+
+### 📚 文档
+- 📄 新增 `API_REFERENCE.md` - 完整的 API 参考文档
+
+---
+
 ## [1.4.1] - 2026-03-06
 
 ### 🔐 安全性修复

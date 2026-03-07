@@ -496,7 +496,7 @@ import { userApi } from '@/api/user'
 import { roleApi } from '@/api/role'
 import type { Role } from '@/api/role'
 import { useUserStore } from '@/store/user'
-import axios from 'axios'
+import request from '@/api/request'
 
 const userStore = useUserStore()
 
@@ -876,7 +876,7 @@ async function handleCreateRabbitMQUser() {
 
   rabbitMQCreating.value = true
   try {
-    const response = await axios.post('/api/users/create_rabbitmq_user/', {
+    const response = await request.post('/users/create_rabbitmq_user/', {
       username: rabbitMQForm.value.username,
       password: rabbitMQForm.value.password,
       tags: rabbitMQForm.value.tags
@@ -913,8 +913,8 @@ async function loadRabbitMQUsers(showSuccess = false) {
 
   rabbitMQUsersLoading.value = true
   try {
-    const response = await axios.get('/api/users/list_rabbitmq_users/')
-    rabbitMQUsers.value = response.data.users || []
+    const response = await request.get('/users/list_rabbitmq_users/')
+    rabbitMQUsers.value = response.users || []
     if (showSuccess) {
       message.success('RabbitMQ 用户列表已刷新')
     }
@@ -933,7 +933,7 @@ async function loadRabbitMQUsers(showSuccess = false) {
 // 删除 RabbitMQ 用户
 async function handleDeleteRabbitMQUser(username: string) {
   try {
-    await axios.post('/api/users/delete_rabbitmq_user/', { username })
+    await request.post('/users/delete_rabbitmq_user/', { username })
     message.success(`RabbitMQ 用户 ${username} 已删除`)
     // 刷新用户列表
     loadRabbitMQUsers()
@@ -966,7 +966,7 @@ async function handleChangeRabbitMQPassword() {
 
   rabbitMQPasswordUpdating.value = true
   try {
-    await axios.post('/api/users/update_rabbitmq_user_password/', {
+    await request.post('/users/update_rabbitmq_user_password/', {
       username: rabbitMQPasswordUser.value.username,
       password: rabbitMQPasswordForm.value.password
     })
@@ -993,8 +993,8 @@ async function showRabbitMQConfig(user: any) {
   }
 
   try {
-    const response = await axios.get(`/api/users/${user.id}/get_rabbitmq_config/`)
-    rabbitMQConfig.value = response.data
+    const response = await request.get(`/users/${user.id}/get_rabbitmq_config/`)
+    rabbitMQConfig.value = response
     rabbitMQConfigVisible.value = true
   } catch (error: any) {
     if (error.response?.data?.error) {
@@ -1017,7 +1017,7 @@ async function toggleRabbitMQ(user: any) {
     content,
     onOk: async () => {
       try {
-        await axios.post(`/api/users/${user.id}/toggle_rabbitmq/`, {
+        await request.post(`/users/${user.id}/toggle_rabbitmq/`, {
           enable: !user.rabbitmq_enabled
         })
         message.success(`RabbitMQ 功能已${action}`)
