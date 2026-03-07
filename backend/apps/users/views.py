@@ -405,7 +405,7 @@ class UserViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[IsAdmin])
     def toggle_rabbitmq(self, request, pk=None):
         """开关用户的 RabbitMQ 功能 - 管理员及以上"""
         if request.user.role not in ['admin', 'super_admin']:
